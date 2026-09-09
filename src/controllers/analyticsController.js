@@ -4,7 +4,7 @@ const db = require('../config/db');
 async function getDashboardAnalytics(req, res) {
   try {
     const prodRes = await db.query('SELECT COUNT(*)::int AS count FROM products WHERE status = 1');
-    const catRes = await db.query('SELECT COUNT(*)::int AS count FROM categories WHERE parent_id IS NULL AND status = 1');
+    const catRes = await db.query('SELECT COUNT(*)::int AS count FROM categories WHERE status = 1');
     const orderRes = await db.query('SELECT COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0)::numeric AS revenue FROM orders');
 
     const totalProducts = prodRes.rows[0].count || 0;
