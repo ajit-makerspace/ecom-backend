@@ -10,12 +10,14 @@ const slugify = (text) => {
     .replace(/^-+|-+$/g, '');
 };
 
-// 1. Get All Products (Raw SQL JOIN with categories and subcategories)
+// 1. Get All Products (Raw SQL JOIN with categories and subcategories, excluding status = 2)
 export const getProducts = async (req, res) => {
   try {
     const { rows } = await db.query(`
       SELECT 
         p.id,
+        c.module_id AS "moduleId",
+        m.name AS "moduleName",
         p.category_id AS "categoryId",
         c.name AS "categoryName",
         p.sub_category_id AS "subCategoryId",
@@ -38,8 +40,10 @@ export const getProducts = async (req, res) => {
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt"
       FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id
-      LEFT JOIN subcategories sc ON p.sub_category_id = sc.id
+      LEFT JOIN categories c ON p.category_id = c.id AND c.status != 2
+      LEFT JOIN modules m ON c.module_id = m.id AND m.status != 2
+      LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status != 2
+      WHERE p.status != 2
       ORDER BY p.id DESC
     `);
 
@@ -283,11 +287,14 @@ export const updateProduct = async (req, res) => {
   }
 };
 
-// 4. Delete Product (Raw SQL Delete)
+// 4. Delete Product (Soft Delete: status = 2)
 export const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const { rows } = await db.query('DELETE FROM products WHERE id = $1 RETURNING id', [id]);
+    const { rows } = await db.query(
+      'UPDATE products SET status = 2, updated_at = NOW() WHERE id = $1 RETURNING id',
+      [id]
+    );
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found.' });
