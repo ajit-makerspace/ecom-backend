@@ -1,7 +1,11 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+import pg from 'pg';
+import dotenv from 'dotenv';
 
-const pool = new Pool({
+dotenv.config();
+
+const { Pool } = pg;
+
+export const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
   user: process.env.DB_USER || 'ajitkumar',
@@ -16,7 +20,9 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle PostgreSQL client:', err);
 });
 
-module.exports = {
+export const db = {
   pool,
   query: (text, params) => pool.query(text, params),
 };
+
+export default db;

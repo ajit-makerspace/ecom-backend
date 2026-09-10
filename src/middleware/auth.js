@@ -1,9 +1,9 @@
-const jwt = require('jsonwebtoken');
-const db = require('../config/db');
-const { USER_TYPES, ROLE_PERMISSIONS } = require('../config/userTypes');
+import jwt from 'jsonwebtoken';
+import db from '../config/db.js';
+import { USER_TYPES, ROLE_PERMISSIONS } from '../config/userTypes.js';
 
 // Authentication JWT Token Verification
-async function authenticateToken(req, res, next) {
+export async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -14,17 +14,17 @@ async function authenticateToken(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretkey123_aura_admin');
     
-    // Fetch user from DB using raw SQL query
-    const userRes = await db.query(
+    // Fetch user from DB using raw SQL query with destructured { rows }
+    const { rows } = await db.query(
       'SELECT id, email, first_name, last_name, user_type, status FROM admin_users WHERE id = $1',
       [decoded.id]
     );
 
-    if (userRes.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Invalid user session.' });
     }
 
-    const user = userRes.rows[0];
+    const user = rows[0];
     req.user = {
       ...user,
       roleName: USER_TYPES[user.user_type] || 'UNKNOWN',
@@ -37,7 +37,7 @@ async function authenticateToken(req, res, next) {
 }
 
 // RBAC Middleware: Require specific user_type role(s)
-function requireRole(allowedRoles = []) {
+export function requireRole(allowedRoles = []) {
   const rolesArray = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
 
   return (req, res, next) => {
@@ -57,7 +57,7 @@ function requireRole(allowedRoles = []) {
 }
 
 // RBAC Middleware: Require specific permission name
-function requirePermission(permission) {
+export function requirePermission(permission) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Unauthenticated.' });
@@ -75,11 +75,11 @@ function requirePermission(permission) {
   };
 }
 
-function requireAdmin(req, res, next) {
+export function requireAdmin(req, res, next) {
   return requireRole([1])(req, res, next);
 }
 
-module.exports = {
+export default {
   authenticateToken,
   requireRole,
   requirePermission,

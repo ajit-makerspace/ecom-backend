@@ -1,19 +1,31 @@
-const express = require('express');
+import express from 'express';
+import {
+  getCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  getSubCategories,
+  createSubCategory,
+  updateSubCategory,
+  deleteSubCategory,
+  bulkImportCategories,
+  bulkImportSubCategories,
+} from '../controllers/categoryController.js';
+
 const router = express.Router();
-const categoryController = require('../controllers/categoryController');
 
 // Main Category Routes
-router.get('/categories', categoryController.getCategories);
-router.post('/categories', categoryController.createCategory);
-router.post('/categories/bulk-import', categoryController.bulkImportCategories);
-router.put('/categories/:id', categoryController.updateCategory);
-router.delete('/categories/:id', categoryController.deleteCategory);
+router.get('/categories', getCategories);
+router.post('/categories', createCategory);
+router.post('/categories/bulk-import', bulkImportCategories);
+router.put('/categories/:id', updateCategory);
+router.delete('/categories/:id', deleteCategory);
 
 // Sub Category Routes
-router.get('/subcategories', categoryController.getSubCategories);
-router.post('/subcategories', categoryController.createSubCategory);
-router.post('/subcategories/bulk-import', categoryController.bulkImportSubCategories);
-router.put('/subcategories/:id', categoryController.updateSubCategory);
-router.delete('/subcategories/:id', categoryController.deleteSubCategory);
+router.get('/subcategories', getSubCategories);
+router.post('/subcategories', createSubCategory);
+router.post('/subcategories/bulk-import', bulkImportSubCategories);
+router.put('/subcategories/:id', updateSubCategory);
+router.delete('/subcategories/:id', deleteSubCategory);
 
-module.exports = router;
+export default router;

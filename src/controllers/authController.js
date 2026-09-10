@@ -1,10 +1,10 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const db = require('../config/db');
-const { USER_TYPES, ROLE_PERMISSIONS } = require('../config/userTypes');
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import db from '../config/db.js';
+import { USER_TYPES, ROLE_PERMISSIONS } from '../config/userTypes.js';
 
 // Raw SQL RBAC Login Controller
-async function login(req, res) {
+export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -16,16 +16,16 @@ async function login(req, res) {
     const cleanPassword = String(password).trim();
 
     // Raw SQL Query to fetch user
-    const result = await db.query(
+    const { rows } = await db.query(
       'SELECT id, email, password_hash, first_name, last_name, user_type, status FROM admin_users WHERE LOWER(email) = $1',
       [cleanEmail]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    const user = result.rows[0];
+    const user = rows[0];
 
     // Check status
     if (user.status !== 1) {
@@ -80,22 +80,22 @@ async function login(req, res) {
     console.error('Auth RBAC Login Controller Error:', err);
     return res.status(500).json({ success: false, message: 'Server error during login.' });
   }
-}
+};
 
 // Raw SQL Get Me Controller
-async function getMe(req, res) {
+export const getMe = async (req, res) => {
   try {
     const userId = req.user.id;
-    const result = await db.query(
+    const { rows } = await db.query(
       'SELECT id, email, first_name, last_name, user_type, status FROM admin_users WHERE id = $1',
       [userId]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    const u = result.rows[0];
+    const u = rows[0];
     const roleName = USER_TYPES[u.user_type] || 'USER';
     const permissions = ROLE_PERMISSIONS[u.user_type] || [];
 
@@ -115,9 +115,4 @@ async function getMe(req, res) {
     console.error('Auth Me Controller Error:', err);
     return res.status(500).json({ success: false, message: 'Server error fetching user.' });
   }
-}
-
-module.exports = {
-  login,
-  getMe,
 };

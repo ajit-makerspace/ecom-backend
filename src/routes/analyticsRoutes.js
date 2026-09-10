@@ -1,7 +1,8 @@
-const express = require('express');
+import express from 'express';
+import { getDashboardAnalytics } from '../controllers/analyticsController.js';
+
 const router = express.Router();
-const analyticsController = require('../controllers/analyticsController');
 
-router.get('/analytics/dashboard', analyticsController.getDashboardAnalytics);
+router.get('/analytics/dashboard', getDashboardAnalytics);
 
-module.exports = router;
+export default router;

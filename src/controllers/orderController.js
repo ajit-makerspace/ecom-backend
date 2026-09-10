@@ -1,9 +1,9 @@
-const db = require('../config/db');
+import db from '../config/db.js';
 
 // Raw SQL Get Orders
-async function getOrders(req, res) {
+export const getOrders = async (req, res) => {
   try {
-    const result = await db.query(`
+    const { rows } = await db.query(`
       SELECT 
         id,
         order_number AS "orderNumber",
@@ -17,7 +17,7 @@ async function getOrders(req, res) {
       ORDER BY id DESC
     `);
 
-    const orders = result.rows.map((o) => ({
+    const orders = rows.map((o) => ({
       ...o,
       totalAmount: parseFloat(o.totalAmount),
     }));
@@ -31,10 +31,10 @@ async function getOrders(req, res) {
     console.error('Get Orders Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch orders.' });
   }
-}
+};
 
 // Raw SQL Update Order Status
-async function updateOrderStatus(req, res) {
+export const updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -42,7 +42,7 @@ async function updateOrderStatus(req, res) {
     let paymentStatus = 'Paid';
     if (status === 'Cancelled') paymentStatus = 'Refunded';
 
-    const result = await db.query(
+    const { rows } = await db.query(
       `UPDATE orders
        SET status = $1, payment_status = $2, updated_at = NOW()
        WHERE id = $3
@@ -50,22 +50,17 @@ async function updateOrderStatus(req, res) {
       [status, paymentStatus, id]
     );
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Order not found.' });
     }
 
     return res.json({
       success: true,
       message: 'Order status updated successfully.',
-      order: result.rows[0],
+      order: rows[0],
     });
   } catch (err) {
     console.error('Update Order Status Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to update order status.' });
   }
-}
-
-module.exports = {
-  getOrders,
-  updateOrderStatus,
 };

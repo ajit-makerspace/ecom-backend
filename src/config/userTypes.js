@@ -1,19 +1,19 @@
 // Role & User Type Definitions for Role-Based Access Control (RBAC)
-const USER_TYPES = {
+export const USER_TYPES = {
   1: 'SUPER_ADMIN',
   2: 'CUSTOMER',
   3: 'VENDOR',
   4: 'STAFF',
 };
 
-const USER_TYPE_CODES = {
+export const USER_TYPE_CODES = {
   SUPER_ADMIN: 1,
   CUSTOMER: 2,
   VENDOR: 3,
   STAFF: 4,
 };
 
-const ROLE_PERMISSIONS = {
+export const ROLE_PERMISSIONS = {
   1: [
     'manage_users',
     'manage_categories',
@@ -28,7 +28,7 @@ const ROLE_PERMISSIONS = {
   4: ['view_categories', 'manage_products', 'manage_orders', 'view_customers'],
 };
 
-module.exports = {
+export default {
   USER_TYPES,
   USER_TYPE_CODES,
   ROLE_PERMISSIONS,

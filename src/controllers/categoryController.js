@@ -1,19 +1,19 @@
-const db = require('../config/db');
+import db from '../config/db.js';
 
 // Helper to generate URL-safe slugs
-function slugify(text) {
+const slugify = (text) => {
   return String(text || '')
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
+};
 
 // 1. Raw SQL Get Main Categories
-async function getCategories(req, res) {
+export const getCategories = async (req, res) => {
   try {
-    const result = await db.query(`
+    const { rows } = await db.query(`
       SELECT 
         c.id,
         c.name,
@@ -27,7 +27,7 @@ async function getCategories(req, res) {
       ORDER BY c.id ASC
     `);
 
-    const categories = result.rows.map((cat) => ({
+    const categories = rows.map((cat) => ({
       ...cat,
       status: cat.status === 1 ? 'Active' : 'Inactive',
     }));
@@ -41,10 +41,10 @@ async function getCategories(req, res) {
     console.error('Get Categories Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch categories.' });
   }
-}
+};
 
 // 2. Raw SQL Create Main Category
-async function createCategory(req, res) {
+export const createCategory = async (req, res) => {
   try {
     const { name, code, image, status } = req.body;
 
@@ -64,14 +64,14 @@ async function createCategory(req, res) {
     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
-    const insertResult = await db.query(
+    const { rows } = await db.query(
       `INSERT INTO categories (name, slug, code, image_url, status)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, name, slug, code, image_url AS image, status, created_at AS "createdAt"`,
       [cleanName, slug, finalCode, imageUrl, statusInt]
     );
 
-    const created = insertResult.rows[0];
+    const created = rows[0];
     created.status = created.status === 1 ? 'Active' : 'Inactive';
     created.productCount = 0;
 
@@ -84,10 +84,10 @@ async function createCategory(req, res) {
     console.error('Create Category Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to create category.' });
   }
-}
+};
 
 // 3. Raw SQL Update Category
-async function updateCategory(req, res) {
+export const updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, code, image, status } = req.body;
@@ -103,7 +103,7 @@ async function updateCategory(req, res) {
     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
-    const updateResult = await db.query(
+    const { rows } = await db.query(
       `UPDATE categories
        SET name = $1, slug = $2, code = $3, image_url = $4, status = $5, updated_at = NOW()
        WHERE id = $6
@@ -111,11 +111,11 @@ async function updateCategory(req, res) {
       [cleanName, slug, finalCode, imageUrl, statusInt, id]
     );
 
-    if (updateResult.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Category not found.' });
     }
 
-    const updated = updateResult.rows[0];
+    const updated = rows[0];
     updated.status = updated.status === 1 ? 'Active' : 'Inactive';
 
     return res.json({
@@ -127,16 +127,15 @@ async function updateCategory(req, res) {
     console.error('Update Category Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to update category.' });
   }
-}
+};
 
 // 4. Raw SQL Delete Category
-async function deleteCategory(req, res) {
+export const deleteCategory = async (req, res) => {
   try {
     const { id } = req.params;
+    const { rows } = await db.query('DELETE FROM categories WHERE id = $1 RETURNING id', [id]);
 
-    const deleteResult = await db.query('DELETE FROM categories WHERE id = $1 RETURNING id', [id]);
-
-    if (deleteResult.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Category not found.' });
     }
 
@@ -148,12 +147,12 @@ async function deleteCategory(req, res) {
     console.error('Delete Category Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to delete category.' });
   }
-}
+};
 
 // 5. Raw SQL Get Sub-Categories
-async function getSubCategories(req, res) {
+export const getSubCategories = async (req, res) => {
   try {
-    const result = await db.query(`
+    const { rows } = await db.query(`
       SELECT 
         s.id,
         s.name,
@@ -168,7 +167,7 @@ async function getSubCategories(req, res) {
       ORDER BY s.id ASC
     `);
 
-    const subCategories = result.rows.map((sub) => ({
+    const subCategories = rows.map((sub) => ({
       ...sub,
       status: sub.status === 1 ? 'Active' : 'Inactive',
     }));
@@ -182,10 +181,10 @@ async function getSubCategories(req, res) {
     console.error('Get SubCategories Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch sub-categories.' });
   }
-}
+};
 
 // 6. Raw SQL Create Sub-Category
-async function createSubCategory(req, res) {
+export const createSubCategory = async (req, res) => {
   try {
     const { name, categoryId, categoryName, code, image, status } = req.body;
 
@@ -230,14 +229,14 @@ async function createSubCategory(req, res) {
       }
     }
 
-    const insertResult = await db.query(
+    const { rows } = await db.query(
       `INSERT INTO subcategories (name, slug, code, image_url, status, category_id)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, name, slug, code, image_url AS image, status, category_id AS "categoryId"`,
       [cleanName, slug, finalCode, imageUrl, statusInt, parentId]
     );
 
-    const created = insertResult.rows[0];
+    const created = rows[0];
     created.status = created.status === 1 ? 'Active' : 'Inactive';
     created.categoryName = parentName;
 
@@ -250,10 +249,10 @@ async function createSubCategory(req, res) {
     console.error('Create SubCategory Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to create sub-category.' });
   }
-}
+};
 
 // 7. Raw SQL Update Sub-Category
-async function updateSubCategory(req, res) {
+export const updateSubCategory = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, categoryId, categoryName, code, image, status } = req.body;
@@ -269,7 +268,6 @@ async function updateSubCategory(req, res) {
     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
-    // Resolve parent category_id
     let parentId = categoryId ? parseInt(categoryId, 10) : null;
     let parentName = categoryName || 'General';
 
@@ -289,7 +287,7 @@ async function updateSubCategory(req, res) {
       }
     }
 
-    const updateResult = await db.query(
+    const { rows } = await db.query(
       `UPDATE subcategories
        SET name = $1, slug = $2, code = $3, image_url = $4, status = $5, category_id = $6, updated_at = NOW()
        WHERE id = $7
@@ -297,11 +295,11 @@ async function updateSubCategory(req, res) {
       [cleanName, slug, finalCode, imageUrl, statusInt, parentId, id]
     );
 
-    if (updateResult.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Sub-category not found.' });
     }
 
-    const updated = updateResult.rows[0];
+    const updated = rows[0];
     updated.status = updated.status === 1 ? 'Active' : 'Inactive';
     updated.categoryName = parentName;
 
@@ -314,15 +312,15 @@ async function updateSubCategory(req, res) {
     console.error('Update SubCategory Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to update sub-category.' });
   }
-}
+};
 
 // 8. Raw SQL Delete Sub-Category
-async function deleteSubCategory(req, res) {
+export const deleteSubCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await db.query('DELETE FROM subcategories WHERE id = $1 RETURNING id', [id]);
+    const { rows } = await db.query('DELETE FROM subcategories WHERE id = $1 RETURNING id', [id]);
 
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Sub-category not found.' });
     }
 
@@ -334,10 +332,10 @@ async function deleteSubCategory(req, res) {
     console.error('Delete SubCategory Error:', err);
     return res.status(500).json({ success: false, message: 'Failed to delete sub-category.' });
   }
-}
+};
 
-// 8. Bulk Import Main Categories (Transactional)
-async function bulkImportCategories(req, res) {
+// 9. Bulk Import Main Categories (Transactional)
+export const bulkImportCategories = async (req, res) => {
   const client = await db.pool.connect();
   try {
     const { categories } = req.body;
@@ -398,10 +396,10 @@ async function bulkImportCategories(req, res) {
   } finally {
     client.release();
   }
-}
+};
 
-// 9. Bulk Import Sub-Categories (Transactional)
-async function bulkImportSubCategories(req, res) {
+// 10. Bulk Import Sub-Categories (Transactional)
+export const bulkImportSubCategories = async (req, res) => {
   const client = await db.pool.connect();
   try {
     const { subCategories } = req.body;
@@ -486,17 +484,4 @@ async function bulkImportSubCategories(req, res) {
   } finally {
     client.release();
   }
-}
-
-module.exports = {
-  getCategories,
-  createCategory,
-  updateCategory,
-  deleteCategory,
-  getSubCategories,
-  createSubCategory,
-  updateSubCategory,
-  deleteSubCategory,
-  bulkImportCategories,
-  bulkImportSubCategories,
 };

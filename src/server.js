@@ -1,13 +1,15 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const errorHandler = require('./middleware/errorHandler');
+import dotenv from 'dotenv';
+import express from 'express';
+import cors from 'cors';
+import errorHandler from './middleware/errorHandler.js';
 
-const authRoutes = require('./routes/authRoutes');
-const categoryRoutes = require('./routes/categoryRoutes');
-const productRoutes = require('./routes/productRoutes');
-const orderRoutes = require('./routes/orderRoutes');
-const analyticsRoutes = require('./routes/analyticsRoutes');
+import authRoutes from './routes/authRoutes.js';
+import categoryRoutes from './routes/categoryRoutes.js';
+import productRoutes from './routes/productRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3005;
@@ -38,7 +40,7 @@ app.use(errorHandler);
 
 // Start Express Server
 app.listen(PORT, () => {
-  console.log(`🚀 E-Commerce Express Backend Server (Raw PostgreSQL) running on port ${PORT}`);
+  console.log(`🚀 E-Commerce Express Backend Server (Raw PostgreSQL - ES Modules) running on port ${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
 });

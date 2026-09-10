@@ -1,4 +1,4 @@
-function errorHandler(err, req, res, next) {
+export function errorHandler(err, req, res, next) {
   console.error('Unhandled Server Error:', err);
 
   const statusCode = err.statusCode || 500;
@@ -11,4 +11,4 @@ function errorHandler(err, req, res, next) {
   });
 }
 
-module.exports = errorHandler;
+export default errorHandler;

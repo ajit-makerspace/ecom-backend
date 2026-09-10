@@ -1,5 +1,5 @@
-const bcrypt = require('bcryptjs');
-const db = require('../config/db');
+import bcrypt from 'bcryptjs';
+import db from '../config/db.js';
 
 async function initDb() {
   console.log('🚀 Starting PostgreSQL Database Initialization (Raw SQL Schema Creation)...');
