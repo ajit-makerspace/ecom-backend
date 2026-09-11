@@ -47,6 +47,38 @@ export const getCategories = async (req, res) => {
   }
 };
 
+// Helper to generate next unique 4-digit Category code (1001, 1002, 1003...)
+const getNextCategoryCode = async (clientOrDb = db) => {
+  try {
+    const { rows } = await clientOrDb.query(
+      `SELECT code FROM categories WHERE code ~ '^\\d{4}$' ORDER BY CAST(code AS INTEGER) DESC LIMIT 1`
+    );
+    if (rows.length > 0 && rows[0].code) {
+      const nextNum = parseInt(rows[0].code, 10) + 1;
+      return String(nextNum).padStart(4, '0');
+    }
+    return '1001';
+  } catch (err) {
+    return Math.floor(1001 + Math.random() * 8999).toString();
+  }
+};
+
+// Helper to generate next unique 4-digit SubCategory code (2001, 2002, 2003...)
+const getNextSubCategoryCode = async (clientOrDb = db) => {
+  try {
+    const { rows } = await clientOrDb.query(
+      `SELECT code FROM subcategories WHERE code ~ '^\\d{4}$' ORDER BY CAST(code AS INTEGER) DESC LIMIT 1`
+    );
+    if (rows.length > 0 && rows[0].code) {
+      const nextNum = parseInt(rows[0].code, 10) + 1;
+      return String(nextNum).padStart(4, '0');
+    }
+    return '2001';
+  } catch (err) {
+    return Math.floor(2001 + Math.random() * 7999).toString();
+  }
+};
+
 // 2. Raw SQL Create Main Category
 export const createCategory = async (req, res) => {
   try {
@@ -63,7 +95,7 @@ export const createCategory = async (req, res) => {
     const rawCode = String(code || '').replace(/\D/g, '');
     const finalCode = rawCode.length === 4
       ? rawCode
-      : Math.floor(1000 + Math.random() * 9000).toString();
+      : await getNextCategoryCode();
 
     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
@@ -149,6 +181,18 @@ export const updateCategory = async (req, res) => {
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Category not found.' });
+    }
+
+    // Cascade inactive status to child subcategories and products
+    if (statusInt === 0) {
+      await db.query(
+        `UPDATE subcategories SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+        [id]
+      );
+      await db.query(
+        `UPDATE products SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+        [id]
+      );
     }
 
     const updated = rows[0];
@@ -242,7 +286,7 @@ export const createSubCategory = async (req, res) => {
     const rawCode = String(code || '').replace(/\D/g, '');
     const finalCode = rawCode.length === 4
       ? rawCode
-      : Math.floor(2000 + Math.random() * 8000).toString();
+      : await getNextSubCategoryCode();
 
     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
@@ -342,6 +386,14 @@ export const updateSubCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Sub-category not found.' });
     }
 
+    // Cascade inactive status to child products
+    if (statusInt === 0) {
+      await db.query(
+        `UPDATE products SET status = 0, updated_at = NOW() WHERE sub_category_id = $1 AND status != 2`,
+        [id]
+      );
+    }
+
     const updated = rows[0];
     updated.status = updated.status === 1 ? 'Active' : 'Inactive';
     updated.categoryName = parentName;
@@ -408,7 +460,7 @@ export const bulkImportCategories = async (req, res) => {
       const rawCode = String(item.code || '').replace(/\D/g, '');
       const finalCode = rawCode.length === 4
         ? rawCode
-        : Math.floor(1000 + Math.random() * 9000).toString();
+        : await getNextCategoryCode(client);
 
       const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
       const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
@@ -491,7 +543,7 @@ export const bulkImportSubCategories = async (req, res) => {
       const rawCode = String(item.code || '').replace(/\D/g, '');
       const finalCode = rawCode.length === 4
         ? rawCode
-        : Math.floor(2000 + Math.random() * 8000).toString();
+        : await getNextSubCategoryCode(client);
 
       const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
       const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
