@@ -30,12 +30,12 @@ app.get('/health', (req, res) => {
 });
 
 // Admin API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api', moduleRoutes);
-app.use('/api', categoryRoutes);
-app.use('/api', productRoutes);
-app.use('/api', orderRoutes);
-app.use('/api', analyticsRoutes);
+app.use('/api/admin/auth', authRoutes);
+app.use('/api/admin', moduleRoutes);
+app.use('/api/admin', categoryRoutes);
+app.use('/api/admin', productRoutes);
+app.use('/api/admin', orderRoutes);
+app.use('/api/admin', analyticsRoutes);
 
 // Centralized Error Handler
 app.use(errorHandler);
@@ -44,5 +44,5 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   console.log(`🚀 E-Commerce Express Backend Server (Raw PostgreSQL - ES Modules) running on port ${PORT}`);
   console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
+  console.log(`🔗 API Base URL: http://localhost:${PORT}/api/admin`);
 });
