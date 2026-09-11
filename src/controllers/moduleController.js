@@ -45,6 +45,22 @@ export const getModules = async (req, res) => {
   }
 };
 
+// Helper to generate next unique 4-digit Module code (1000, 1001, 1002...)
+const getNextModuleCode = async (clientOrDb = db) => {
+  try {
+    const { rows } = await clientOrDb.query(
+      `SELECT code FROM modules WHERE code ~ '^\\d{4}$' ORDER BY CAST(code AS INTEGER) DESC LIMIT 1`
+    );
+    if (rows.length > 0 && rows[0].code) {
+      const nextNum = parseInt(rows[0].code, 10) + 1;
+      return String(nextNum).padStart(4, '0');
+    }
+    return '1000';
+  } catch (err) {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+  }
+};
+
 // 2. Raw SQL Create Module
 export const createModule = async (req, res) => {
   try {
@@ -61,7 +77,7 @@ export const createModule = async (req, res) => {
     const rawCode = String(code || '').replace(/\D/g, '');
     const finalCode = rawCode.length === 4
       ? rawCode
-      : Math.floor(1000 + Math.random() * 9000).toString();
+      : await getNextModuleCode();
 
     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
@@ -115,6 +131,24 @@ export const updateModule = async (req, res) => {
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Module not found.' });
+    }
+
+    // Cascade inactive status to child categories, subcategories, and products
+    if (statusInt === 0) {
+      await db.query(
+        `UPDATE categories SET status = 0, updated_at = NOW() WHERE module_id = $1 AND status != 2`,
+        [id]
+      );
+      await db.query(
+        `UPDATE subcategories SET status = 0, updated_at = NOW()
+         WHERE category_id IN (SELECT id FROM categories WHERE module_id = $1) AND status != 2`,
+        [id]
+      );
+      await db.query(
+        `UPDATE products SET status = 0, updated_at = NOW()
+         WHERE category_id IN (SELECT id FROM categories WHERE module_id = $1) AND status != 2`,
+        [id]
+      );
     }
 
     const updated = rows[0];
@@ -182,7 +216,7 @@ export const bulkImportModules = async (req, res) => {
       const rawCode = String(item.code || '').replace(/\D/g, '');
       const finalCode = rawCode.length === 4
         ? rawCode
-        : Math.floor(1000 + Math.random() * 9000).toString();
+        : await getNextModuleCode(client);
 
       const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
       const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
