@@ -1,4 +1,4 @@
-import db from '../config/db.js';
+import db from '../../config/db.js';
 
 // Helper to generate URL-safe slugs
 const slugify = (text) => {

@@ -1,4 +1,4 @@
-import db from '../config/db.js';
+import db from '../../config/db.js';
 
 // Raw SQL Get Orders
 export const getOrders = async (req, res) => {

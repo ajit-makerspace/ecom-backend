@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import db from '../config/db.js';
-import { USER_TYPES, ROLE_PERMISSIONS } from '../config/userTypes.js';
+import db from '../../config/db.js';
+import { USER_TYPES, ROLE_PERMISSIONS } from '../../config/userTypes.js';
 
 // Raw SQL RBAC Login Controller
 export const login = async (req, res) => {

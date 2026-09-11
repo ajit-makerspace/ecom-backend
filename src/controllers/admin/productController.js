@@ -1,5 +1,5 @@
-import db from '../config/db.js';
-import { generateSku } from '../utils/skuGenerator.js';
+import db from '../../config/db.js';
+import { generateSku } from '../../utils/skuGenerator.js';
 
 const slugify = (text) => {
   return String(text || '')

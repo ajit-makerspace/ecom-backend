@@ -3,12 +3,12 @@ import express from 'express';
 import cors from 'cors';
 import errorHandler from './middleware/errorHandler.js';
 
-import authRoutes from './routes/authRoutes.js';
-import moduleRoutes from './routes/moduleRoutes.js';
-import categoryRoutes from './routes/categoryRoutes.js';
-import productRoutes from './routes/productRoutes.js';
-import orderRoutes from './routes/orderRoutes.js';
-import analyticsRoutes from './routes/analyticsRoutes.js';
+import authRoutes from './routes/admin/authRoutes.js';
+import moduleRoutes from './routes/admin/moduleRoutes.js';
+import categoryRoutes from './routes/admin/categoryRoutes.js';
+import productRoutes from './routes/admin/productRoutes.js';
+import orderRoutes from './routes/admin/orderRoutes.js';
+import analyticsRoutes from './routes/admin/analyticsRoutes.js';
 
 dotenv.config();
 
@@ -29,7 +29,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes
+// Admin API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api', moduleRoutes);
 app.use('/api', categoryRoutes);

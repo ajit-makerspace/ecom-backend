@@ -5,7 +5,7 @@ import {
   updateModule,
   deleteModule,
   bulkImportModules,
-} from '../controllers/moduleController.js';
+} from '../../controllers/admin/moduleController.js';
 
 const router = express.Router();
 

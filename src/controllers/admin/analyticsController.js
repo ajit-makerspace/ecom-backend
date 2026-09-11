@@ -1,4 +1,4 @@
-import db from '../config/db.js';
+import db from '../../config/db.js';
 
 // Raw SQL Dashboard Analytics Controller
 export const getDashboardAnalytics = async (req, res) => {
