@@ -9,6 +9,7 @@ import categoryRoutes from './routes/admin/categoryRoutes.js';
 import productRoutes from './routes/admin/productRoutes.js';
 import orderRoutes from './routes/admin/orderRoutes.js';
 import analyticsRoutes from './routes/admin/analyticsRoutes.js';
+import userAuthRoutes from './routes/user/userAuthRoutes.js';
 
 dotenv.config();
 
@@ -37,12 +38,14 @@ app.use('/api/admin', productRoutes);
 app.use('/api/admin', orderRoutes);
 app.use('/api/admin', analyticsRoutes);
 
+// Customer API Routes
+app.use('/api/user/auth', userAuthRoutes);
+
 // Centralized Error Handler
 app.use(errorHandler);
 
 // Start Express Server
 app.listen(PORT, () => {
-  console.log(`🚀 E-Commerce Express Backend Server (Raw PostgreSQL - ES Modules) running on port ${PORT}`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 API Base URL: http://localhost:${PORT}/api/admin`);
+  console.log(`Express Backend Server running on port ${PORT}`);
+  console.log(`API Base URL: http://localhost:${PORT}/api/admin`);
 });
