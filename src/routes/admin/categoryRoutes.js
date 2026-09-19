@@ -10,7 +10,7 @@ import {
   deleteSubCategory,
   bulkImportCategories,
   bulkImportSubCategories,
-} from '../controllers/categoryController.js';
+} from '../../controllers/admin/categoryController.js';
 
 const router = express.Router();
 

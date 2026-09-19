@@ -3,12 +3,13 @@ import express from 'express';
 import cors from 'cors';
 import errorHandler from './middleware/errorHandler.js';
 
-import authRoutes from './routes/authRoutes.js';
-import moduleRoutes from './routes/moduleRoutes.js';
-import categoryRoutes from './routes/categoryRoutes.js';
-import productRoutes from './routes/productRoutes.js';
-import orderRoutes from './routes/orderRoutes.js';
-import analyticsRoutes from './routes/analyticsRoutes.js';
+import authRoutes from './routes/admin/authRoutes.js';
+import moduleRoutes from './routes/admin/moduleRoutes.js';
+import categoryRoutes from './routes/admin/categoryRoutes.js';
+import productRoutes from './routes/admin/productRoutes.js';
+import orderRoutes from './routes/admin/orderRoutes.js';
+import analyticsRoutes from './routes/admin/analyticsRoutes.js';
+import userAuthRoutes from './routes/user/userAuthRoutes.js';
 
 dotenv.config();
 
@@ -29,20 +30,22 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api', moduleRoutes);
-app.use('/api', categoryRoutes);
-app.use('/api', productRoutes);
-app.use('/api', orderRoutes);
-app.use('/api', analyticsRoutes);
+// Admin API Routes
+app.use('/api/admin/auth', authRoutes);
+app.use('/api/admin', moduleRoutes);
+app.use('/api/admin', categoryRoutes);
+app.use('/api/admin', productRoutes);
+app.use('/api/admin', orderRoutes);
+app.use('/api/admin', analyticsRoutes);
+
+// Customer API Routes
+app.use('/api/user/auth', userAuthRoutes);
 
 // Centralized Error Handler
 app.use(errorHandler);
 
 // Start Express Server
 app.listen(PORT, () => {
-  console.log(`🚀 E-Commerce Express Backend Server (Raw PostgreSQL - ES Modules) running on port ${PORT}`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
+  console.log(`Express Backend Server running on port ${PORT}`);
+  console.log(`API Base URL: http://localhost:${PORT}/api/admin`);
 });
