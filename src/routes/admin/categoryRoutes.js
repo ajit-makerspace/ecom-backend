@@ -11,8 +11,12 @@ import {
   bulkImportCategories,
   bulkImportSubCategories,
 } from '../../controllers/admin/categoryController.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 
 const router = express.Router();
+
+router.use(authenticateToken);
+router.use(requireAdmin);
 
 // Main Category Routes
 router.get('/categories', getCategories);

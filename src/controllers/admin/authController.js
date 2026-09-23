@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import db from '../../config/db.js';
 import { USER_TYPES, ROLE_PERMISSIONS } from '../../config/userTypes.js';
+import { JWT_SECRET } from '../../config/jwt.js';
 
 // Raw SQL RBAC Login Controller
 export const login = async (req, res) => {
@@ -55,7 +56,7 @@ export const login = async (req, res) => {
 
     const token = jwt.sign(
       payload,
-      process.env.JWT_SECRET || 'supersecretkey123_aura_admin',
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 

@@ -32,6 +32,24 @@ export const getProducts = async (req, res) => {
         p.weight,
         p.has_variants AS "hasVariants",
         p.is_featured AS "isFeatured",
+        p.is_kit AS "isKit",
+        p.specifications,
+        p.kit_discount_percentage AS "kitDiscountPercentage",
+        (
+          SELECT json_agg(
+            json_build_object(
+              'productId', ki.product_id,
+              'quantity', ki.quantity,
+              'name', cp.name,
+              'sku', cp.sku,
+              'price', cp.price::numeric
+            ) ORDER BY ki.sort_order ASC
+          )
+          FROM kit_items ki
+          JOIN products cp ON ki.product_id = cp.id
+          WHERE ki.kit_id = p.id
+        ) AS "kitItems",
+        (SELECT COUNT(*)::int FROM kit_items ki WHERE ki.kit_id = p.id) AS "componentsCount",
         p.sort_order AS "sortOrder",
         p.meta_title AS "metaTitle",
         p.meta_description AS "metaDescription",
@@ -53,6 +71,8 @@ export const getProducts = async (req, res) => {
       oldPrice: prod.oldPrice ? parseFloat(prod.oldPrice) : null,
       weight: prod.weight ? parseFloat(prod.weight) : null,
       status: prod.status === 1 ? 'Active' : 'Inactive',
+      specifications: typeof prod.specifications === 'object' && prod.specifications !== null ? prod.specifications : {},
+      kitItems: prod.kitItems || [],
     }));
 
     return res.json({
@@ -81,6 +101,12 @@ export const createProduct = async (req, res) => {
       description,
       hasVariants,
       isFeatured,
+      isKit,
+      is_kit,
+      specifications,
+      kitDiscountPercentage,
+      kit_items,
+      kitItems,
       sortOrder,
       metaTitle,
       metaDescription,
@@ -115,20 +141,24 @@ export const createProduct = async (req, res) => {
 
     const boolHasVariants = Boolean(hasVariants);
     const boolIsFeatured = Boolean(isFeatured);
+    const boolIsKit = Boolean(isKit !== undefined ? isKit : is_kit);
+    const specsJson = typeof specifications === 'object' && specifications !== null ? JSON.stringify(specifications) : (typeof specifications === 'string' ? specifications : '{}');
+    const numKitDiscount = parseFloat(kitDiscountPercentage || 0) || 0.00;
     const numSortOrder = parseInt(sortOrder || '0', 10);
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 2;
+    const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 0;
 
     const { rows } = await db.query(
       `INSERT INTO products (
         category_id, sub_category_id, name, slug, sku, description, brand,
-        price, old_price, weight, has_variants, is_featured, sort_order,
-        meta_title, meta_description, image_url, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        price, old_price, weight, has_variants, is_featured, is_kit, specifications,
+        kit_discount_percentage, sort_order, meta_title, meta_description, image_url, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       RETURNING 
         id, category_id AS "categoryId", sub_category_id AS "subCategoryId",
         name, slug, sku, description, brand, price, old_price AS "oldPrice",
         weight, has_variants AS "hasVariants", is_featured AS "isFeatured",
+        is_kit AS "isKit", specifications, kit_discount_percentage AS "kitDiscountPercentage",
         sort_order AS "sortOrder", meta_title AS "metaTitle", meta_description AS "metaDescription",
         image_url AS "image", status, created_at AS "createdAt", updated_at AS "updatedAt"`,
       [
@@ -144,6 +174,9 @@ export const createProduct = async (req, res) => {
         numWeight,
         boolHasVariants,
         boolIsFeatured,
+        boolIsKit,
+        specsJson,
+        numKitDiscount,
         numSortOrder,
         metaTitle || '',
         metaDescription || '',
@@ -154,6 +187,24 @@ export const createProduct = async (req, res) => {
 
     const created = rows[0];
 
+    // If product is a Kit, save constituent kit items
+    const itemsToInsert = kit_items || kitItems || [];
+    if (boolIsKit && Array.isArray(itemsToInsert) && itemsToInsert.length > 0) {
+      let sortOrder = 0;
+      for (const item of itemsToInsert) {
+        const compId = item.productId || item.id;
+        const qty = parseInt(item.quantity || 1, 10);
+        if (compId && qty > 0) {
+          await db.query(
+            `INSERT INTO kit_items (kit_id, product_id, quantity, sort_order)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (kit_id, product_id) DO UPDATE SET quantity = EXCLUDED.quantity`,
+            [created.id, compId, qty, sortOrder++]
+          );
+        }
+      }
+    }
+
     const catRes = await db.query('SELECT name FROM categories WHERE id = $1', [catId]);
     const subCatRes = subCatId ? await db.query('SELECT name FROM subcategories WHERE id = $1', [subCatId]) : { rows: [] };
 
@@ -163,6 +214,7 @@ export const createProduct = async (req, res) => {
     created.oldPrice = created.oldPrice ? parseFloat(created.oldPrice) : null;
     created.weight = created.weight ? parseFloat(created.weight) : null;
     created.status = created.status === 1 ? 'Active' : 'Inactive';
+    created.specifications = typeof created.specifications === 'object' && created.specifications !== null ? created.specifications : {};
 
     return res.status(201).json({
       success: true,
@@ -191,6 +243,12 @@ export const updateProduct = async (req, res) => {
       description,
       hasVariants,
       isFeatured,
+      isKit,
+      is_kit,
+      specifications,
+      kitDiscountPercentage,
+      kit_items,
+      kitItems,
       sortOrder,
       metaTitle,
       metaDescription,
@@ -208,9 +266,12 @@ export const updateProduct = async (req, res) => {
 
     const boolHasVariants = Boolean(hasVariants);
     const boolIsFeatured = Boolean(isFeatured);
+    const boolIsKit = isKit !== undefined ? Boolean(isKit) : (is_kit !== undefined ? Boolean(is_kit) : false);
+    const specsJson = typeof specifications === 'object' && specifications !== null ? JSON.stringify(specifications) : (typeof specifications === 'string' ? specifications : '{}');
+    const numKitDiscount = parseFloat(kitDiscountPercentage || 0) || 0.00;
     const numSortOrder = parseInt(sortOrder || '0', 10);
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 2;
+    const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 0;
 
     const { rows } = await db.query(
       `UPDATE products
@@ -226,17 +287,21 @@ export const updateProduct = async (req, res) => {
          description = $9,
          has_variants = $10,
          is_featured = $11,
-         sort_order = $12,
-         meta_title = $13,
-         meta_description = $14,
-         image_url = $15,
-         status = $16,
+         is_kit = $12,
+         specifications = $13,
+         kit_discount_percentage = $14,
+         sort_order = $15,
+         meta_title = $16,
+         meta_description = $17,
+         image_url = $18,
+         status = $19,
          updated_at = NOW()
-       WHERE id = $17
+       WHERE id = $20
        RETURNING 
          id, category_id AS "categoryId", sub_category_id AS "subCategoryId",
          name, slug, sku, description, brand, price, old_price AS "oldPrice",
          weight, has_variants AS "hasVariants", is_featured AS "isFeatured",
+         is_kit AS "isKit", specifications, kit_discount_percentage AS "kitDiscountPercentage",
          sort_order AS "sortOrder", meta_title AS "metaTitle", meta_description AS "metaDescription",
          image_url AS "image", status, created_at AS "createdAt", updated_at AS "updatedAt"`,
       [
@@ -251,6 +316,9 @@ export const updateProduct = async (req, res) => {
         description || '',
         boolHasVariants,
         boolIsFeatured,
+        boolIsKit,
+        specsJson,
+        numKitDiscount,
         numSortOrder,
         metaTitle || '',
         metaDescription || '',
@@ -262,6 +330,25 @@ export const updateProduct = async (req, res) => {
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+
+    // If kit items are provided, update kit_items table
+    const itemsToUpdate = kit_items || kitItems;
+    if (Array.isArray(itemsToUpdate)) {
+      await db.query('DELETE FROM kit_items WHERE kit_id = $1', [id]);
+      let sortOrder = 0;
+      for (const item of itemsToUpdate) {
+        const compId = item.productId || item.id;
+        const qty = parseInt(item.quantity || 1, 10);
+        if (compId && qty > 0) {
+          await db.query(
+            `INSERT INTO kit_items (kit_id, product_id, quantity, sort_order)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (kit_id, product_id) DO UPDATE SET quantity = EXCLUDED.quantity`,
+            [id, compId, qty, sortOrder++]
+          );
+        }
+      }
     }
 
     const updated = rows[0];

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import db from '../../config/db.js';
+import { JWT_SECRET } from '../../config/jwt.js';
 
 // Customer Registration Controller (Inserts into public.users and optionally public.user_addresses)
 export const registerUser = async (req, res) => {
@@ -14,7 +15,6 @@ export const registerUser = async (req, res) => {
       date_of_birth,
       gender,
       profile_image_url,
-      // Optional Address fields
       address_line_1,
       address_line_2,
       city,
@@ -38,6 +38,13 @@ export const registerUser = async (req, res) => {
     const cleanDob = date_of_birth ? String(date_of_birth).trim() : null;
     const cleanGender = gender ? String(gender).trim() : null;
 
+    if (cleanPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long.',
+      });
+    }
+
     // Check if user email already exists
     const existingUser = await db.query(
       'SELECT id FROM users WHERE LOWER(email) = $1',
@@ -51,16 +58,14 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    // Hash Password
+    // Secure bcrypt hashing (NO plaintext passwords stored!)
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(cleanPassword, saltRounds);
 
-    // Insert into users table (storing both hashed password_hash and plain password)
     const insertUserQuery = `
       INSERT INTO users (
         email,
         password_hash,
-        password,
         role,
         status,
         first_name,
@@ -72,16 +77,13 @@ export const registerUser = async (req, res) => {
         last_login_at,
         created_at,
         updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), NOW())
+      ) VALUES ($1, $2, 1, 1, $3, $4, $5, $6, $7, $8, NOW(), NOW(), NOW())
       RETURNING id, email, first_name, last_name, phone, gender, date_of_birth, role, status, created_at;
     `;
 
     const userValues = [
       cleanEmail,
       passwordHash,
-      cleanPassword, // Plain password stored in public.users(password)
-      1, // Role: 1 = Customer
-      1, // Status: 1 = Active
       cleanFirstName,
       cleanLastName,
       cleanPhone,
@@ -112,13 +114,12 @@ export const registerUser = async (req, res) => {
           is_default,
           created_at,
           updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+        ) VALUES ($1, 'shipping', $2, $3, $4, $5, $6, $7, $8, $9, $10, true, NOW(), NOW())
         RETURNING id, address_type, address_line_1, city, state, postal_code, country;
       `;
 
       const addressValues = [
         user.id,
-        'shipping',
         cleanFirstName,
         cleanLastName,
         cleanPhone,
@@ -128,7 +129,6 @@ export const registerUser = async (req, res) => {
         String(state).trim(),
         String(postal_code).trim(),
         country ? String(country).trim() : 'India',
-        true, // is_default
       ];
 
       const newAddressRes = await db.query(insertAddressQuery, addressValues);
@@ -140,12 +140,12 @@ export const registerUser = async (req, res) => {
       id: user.id,
       email: user.email,
       role: 'CUSTOMER',
-      user_type: 1,
+      user_type: 2,
     };
 
     const token = jwt.sign(
       payload,
-      process.env.JWT_SECRET || 'supersecretkey123_aura_admin',
+      JWT_SECRET,
       { expiresIn: '30d' }
     );
 
@@ -187,7 +187,9 @@ export const loginUser = async (req, res) => {
     const cleanPassword = String(password).trim();
 
     const { rows } = await db.query(
-      'SELECT id, email, password_hash, password, first_name, last_name, phone, status FROM users WHERE LOWER(email) = $1',
+      `SELECT id, email, password_hash, first_name, last_name, phone, gender, date_of_birth, status, profile_image_url
+       FROM users
+       WHERE LOWER(email) = $1`,
       [cleanEmail]
     );
 
@@ -198,28 +200,34 @@ export const loginUser = async (req, res) => {
     const user = rows[0];
 
     if (user.status !== 1) {
-      return res.status(403).json({ success: false, message: 'Account is deactivated.' });
+      return res.status(403).json({ success: false, message: 'Your account has been deactivated. Please contact support.' });
     }
 
-    const isBcryptValid = user.password_hash ? await bcrypt.compare(cleanPassword, user.password_hash) : false;
-    const isPlainValid = user.password ? cleanPassword === user.password : false;
-
-    if (!isBcryptValid && !isPlainValid) {
+    // Verify bcrypt hash securely
+    const isPasswordValid = await bcrypt.compare(cleanPassword, user.password_hash);
+    if (!isPasswordValid) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
+    // Update last_login_at
     await db.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+
+    // Fetch user default address if exists
+    const addrRes = await db.query(
+      'SELECT id, address_line_1, city, state, postal_code, country FROM user_addresses WHERE user_id = $1 ORDER BY is_default DESC LIMIT 1',
+      [user.id]
+    );
 
     const payload = {
       id: user.id,
       email: user.email,
       role: 'CUSTOMER',
-      user_type: 1,
+      user_type: 2,
     };
 
     const token = jwt.sign(
       payload,
-      process.env.JWT_SECRET || 'supersecretkey123_aura_admin',
+      JWT_SECRET,
       { expiresIn: '30d' }
     );
 
@@ -233,11 +241,58 @@ export const loginUser = async (req, res) => {
         firstName: user.first_name,
         lastName: user.last_name,
         phone: user.phone,
+        gender: user.gender,
+        dateOfBirth: user.date_of_birth,
+        profileImageUrl: user.profile_image_url,
         role: 'Customer',
+        address: addrRes.rows[0] || null,
       },
     });
   } catch (err) {
     console.error('User Login Controller Error:', err);
     return res.status(500).json({ success: false, message: 'Server error during login.' });
+  }
+};
+
+// Customer Get Profile / Session Controller
+export const getCustomerMe = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { rows } = await db.query(
+      `SELECT id, email, first_name, last_name, phone, gender, date_of_birth, status, profile_image_url, created_at
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Customer not found.' });
+    }
+
+    const u = rows[0];
+    const addrRes = await db.query(
+      'SELECT * FROM user_addresses WHERE user_id = $1 ORDER BY is_default DESC, created_at DESC',
+      [userId]
+    );
+
+    return res.json({
+      success: true,
+      user: {
+        id: u.id,
+        email: u.email,
+        firstName: u.first_name,
+        lastName: u.last_name,
+        phone: u.phone,
+        gender: u.gender,
+        dateOfBirth: u.date_of_birth,
+        profileImageUrl: u.profile_image_url,
+        role: 'Customer',
+        status: u.status === 1 ? 'Active' : 'Inactive',
+        createdAt: u.created_at,
+        addresses: addrRes.rows,
+      },
+    });
+  } catch (err) {
+    console.error('Customer Me Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch customer profile.' });
   }
 };

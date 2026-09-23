@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDashboardAnalytics } from '../../controllers/admin/analyticsController.js';
+import { getCustomers, updateCustomerStatus } from '../../controllers/admin/customerController.js';
 import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 
 const router = express.Router();
@@ -7,7 +7,7 @@ const router = express.Router();
 router.use(authenticateToken);
 router.use(requireAdmin);
 
-router.get('/analytics', getDashboardAnalytics);
-router.get('/analytics/dashboard', getDashboardAnalytics);
+router.get('/customers', getCustomers);
+router.put('/customers/:id/status', updateCustomerStatus);
 
 export default router;

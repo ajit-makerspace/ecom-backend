@@ -6,8 +6,12 @@ import {
   deleteProduct,
   bulkImportProducts,
 } from '../../controllers/admin/productController.js';
+import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 
 const router = express.Router();
+
+router.use(authenticateToken);
+router.use(requireAdmin);
 
 router.get('/products', getProducts);
 router.post('/products', createProduct);
