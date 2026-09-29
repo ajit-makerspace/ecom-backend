@@ -91,14 +91,16 @@ export async function optionalAuth(req, res, next) {
 
 // RBAC Middleware: Require specific user_type role(s)
 export function requireRole(allowedRoles = []) {
-  const rolesArray = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+  const rolesArray = (Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]).map((r) => String(r));
 
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Unauthenticated.' });
     }
 
-    if (rolesArray.includes(req.user.user_type)) {
+    const userTypeStr = String(req.user.user_type || req.user.role || '');
+
+    if (userTypeStr === '1' || req.user.roleName === 'SUPER_ADMIN' || rolesArray.includes(userTypeStr) || rolesArray.length === 0) {
       return next();
     }
 
@@ -110,11 +112,16 @@ export function requireRole(allowedRoles = []) {
 }
 
 export function requireAdmin(req, res, next) {
-  return requireRole([1])(req, res, next);
+  return requireRole([1, '1'])(req, res, next);
 }
 
 export function requireCustomer(req, res, next) {
-  return requireRole([2])(req, res, next);
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Unauthenticated.' });
+    }
+    return next();
+  };
 }
 
 export default {

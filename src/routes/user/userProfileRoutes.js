@@ -12,7 +12,6 @@ import { authenticateToken, requireCustomer } from '../../middleware/auth.js';
 const router = express.Router();
 
 router.use(authenticateToken);
-router.use(requireCustomer);
 
 router.get('/profile', getProfile);
 router.put('/profile', updateProfile);
