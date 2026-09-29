@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
+import fs from 'node:fs';
 import errorHandler from './middleware/errorHandler.js';
 
 import authRoutes from './routes/admin/authRoutes.js';
@@ -34,6 +35,19 @@ app.use('/uploads', express.static(UPLOADS_DIR, {
   maxAge: '7d',
   etag: true,
 }));
+
+// Fallback upload resolver: if a file is requested under /uploads/:folder/:filename but resides in another folder (e.g. general), resolve it safely
+app.get('/uploads/:folder/:filename', (req, res, next) => {
+  const { filename } = req.params;
+  const folders = ['products', 'general', 'categories', 'banners', 'showcases', 'profiles'];
+  for (const f of folders) {
+    const candidate = path.join(UPLOADS_DIR, f, filename);
+    if (fs.existsSync(candidate)) {
+      return res.sendFile(candidate);
+    }
+  }
+  next();
+});
 
 // File Upload Routes
 app.use('/api', uploadRoutes);
