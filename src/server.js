@@ -68,8 +68,8 @@ app.use('/api/user', userProfileRoutes);
 app.use(errorHandler);
 
 // Start Express Server
-app.listen(PORT, () => {
-  console.log(`🚀 Express Backend Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Express Backend Server running on port ${PORT} (Listening on 0.0.0.0 for local network access)`);
   console.log(`🛒 Storefront API: http://localhost:${PORT}/api/user`);
   console.log(`⚙️ Admin API: http://localhost:${PORT}/api/admin`);
 });
