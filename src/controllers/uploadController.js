@@ -38,13 +38,13 @@ export const sanitizeFolder = (folderName) => {
 // Configure Multer Disk Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const folder = sanitizeFolder(req.body?.folder || req.query?.folder);
+    const folder = sanitizeFolder(req.query?.folder || req.body?.folder);
     const targetDir = path.join(UPLOADS_ROOT, folder);
     ensureDirExists(targetDir);
     cb(null, targetDir);
   },
   filename: (req, file, cb) => {
-    const folder = sanitizeFolder(req.body?.folder || req.query?.folder);
+    const folder = sanitizeFolder(req.query?.folder || req.body?.folder);
     const ext = ALLOWED_MIME_TYPES[file.mimetype] || path.extname(file.originalname).toLowerCase() || '.png';
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeName = `${folder}-${Date.now()}-${uniqueId}${ext}`;
@@ -83,8 +83,10 @@ export const handleSingleUpload = (req, res) => {
       });
     }
 
-    const folder = sanitizeFolder(req.body?.folder || req.query?.folder);
-    const relativeUrl = `/uploads/${folder}/${req.file.filename}`;
+    const actualFolder = req.file.destination
+      ? path.basename(req.file.destination)
+      : sanitizeFolder(req.query?.folder || req.body?.folder);
+    const relativeUrl = `/uploads/${actualFolder}/${req.file.filename}`;
 
     return res.status(201).json({
       success: true,
