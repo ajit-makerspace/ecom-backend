@@ -1,20 +1,7 @@
 import path from 'node:path';
-import fs from 'node:fs';
 import crypto from 'node:crypto';
 import multer from 'multer';
-
-// Base uploads directory relative to backend project root
-const UPLOADS_ROOT = path.resolve(process.cwd(), 'uploads');
-
-// Ensure folder exists helper
-const ensureDirExists = (dirPath) => {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-};
-
-// Ensure root uploads folder exists
-ensureDirExists(UPLOADS_ROOT);
+import db from '../config/db.js';
 
 // Allowed MIME types map
 const ALLOWED_MIME_TYPES = {
@@ -35,22 +22,8 @@ export const sanitizeFolder = (folderName) => {
   return allowedFolders.includes(clean) ? clean : 'general';
 };
 
-// Configure Multer Disk Storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const folder = sanitizeFolder(req.query?.folder || req.body?.folder);
-    const targetDir = path.join(UPLOADS_ROOT, folder);
-    ensureDirExists(targetDir);
-    cb(null, targetDir);
-  },
-  filename: (req, file, cb) => {
-    const folder = sanitizeFolder(req.query?.folder || req.body?.folder);
-    const ext = ALLOWED_MIME_TYPES[file.mimetype] || path.extname(file.originalname).toLowerCase() || '.png';
-    const uniqueId = crypto.randomBytes(6).toString('hex');
-    const safeName = `${folder}-${Date.now()}-${uniqueId}${ext}`;
-    cb(null, safeName);
-  },
-});
+// Multer memory storage (keeps binary in memory Buffer, saves to PostgreSQL)
+const storage = multer.memoryStorage();
 
 // File filter for security
 const fileFilter = (req, file, cb) => {
@@ -72,9 +45,9 @@ export const multerUpload = multer({
 });
 
 /**
- * Handle single file upload from FormData
+ * Handle single file upload - saves directly to PostgreSQL media_files table
  */
-export const handleSingleUpload = (req, res) => {
+export const handleSingleUpload = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -83,34 +56,45 @@ export const handleSingleUpload = (req, res) => {
       });
     }
 
-    const actualFolder = req.file.destination
-      ? path.basename(req.file.destination)
-      : sanitizeFolder(req.query?.folder || req.body?.folder);
-    const relativeUrl = `/uploads/${actualFolder}/${req.file.filename}`;
+    const folder = sanitizeFolder(req.query?.folder || req.body?.folder);
+    const ext = ALLOWED_MIME_TYPES[req.file.mimetype] || path.extname(req.file.originalname).toLowerCase() || '.png';
+    const uniqueId = crypto.randomBytes(6).toString('hex');
+    const safeName = `${folder}-${Date.now()}-${uniqueId}${ext}`;
+
+    const { rows } = await db.query(
+      `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, data)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, filename, mime_type, file_size`,
+      [safeName, req.file.originalname, req.file.mimetype, req.file.size, folder, req.file.buffer]
+    );
+
+    const mediaId = rows[0].id;
+    const relativeUrl = `/api/media/${mediaId}`;
 
     return res.status(201).json({
       success: true,
-      message: 'File uploaded successfully.',
+      message: 'File saved to database successfully.',
       url: relativeUrl,
       path: relativeUrl,
-      filename: req.file.filename,
+      mediaId,
+      filename: safeName,
       originalName: req.file.originalname,
       mimetype: req.file.mimetype,
       size: req.file.size,
     });
   } catch (err) {
-    console.error('Upload Error:', err);
+    console.error('Database Upload Error:', err);
     return res.status(500).json({
       success: false,
-      message: err.message || 'File upload failed.',
+      message: err.message || 'File upload to database failed.',
     });
   }
 };
 
 /**
- * Handle base64 payload upload (fallback/alternative for programmatic image uploads)
+ * Handle base64 payload upload - saves directly to PostgreSQL media_files table
  */
-export const handleBase64Upload = (req, res) => {
+export const handleBase64Upload = async (req, res) => {
   try {
     const { data, image, fileData, filename, folder: rawFolder } = req.body;
     const base64String = data || image || fileData;
@@ -123,8 +107,6 @@ export const handleBase64Upload = (req, res) => {
     }
 
     const folder = sanitizeFolder(rawFolder || req.query?.folder);
-    const targetDir = path.join(UPLOADS_ROOT, folder);
-    ensureDirExists(targetDir);
 
     // Extract MIME type and raw base64 data
     const matches = base64String.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
@@ -148,26 +130,32 @@ export const handleBase64Upload = (req, res) => {
 
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeFilename = `${folder}-${Date.now()}-${uniqueId}${ext}`;
-    const destinationPath = path.join(targetDir, safeFilename);
 
-    fs.writeFileSync(destinationPath, buffer);
+    const { rows } = await db.query(
+      `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, data)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, filename, mime_type, file_size`,
+      [safeFilename, filename || safeFilename, mimeType, buffer.length, folder, buffer]
+    );
 
-    const relativeUrl = `/uploads/${folder}/${safeFilename}`;
+    const mediaId = rows[0].id;
+    const relativeUrl = `/api/media/${mediaId}`;
 
     return res.status(201).json({
       success: true,
-      message: 'Base64 image saved successfully.',
+      message: 'Base64 image saved to database successfully.',
       url: relativeUrl,
       path: relativeUrl,
+      mediaId,
       filename: safeFilename,
       mimetype: mimeType,
       size: buffer.length,
     });
   } catch (err) {
-    console.error('Base64 Upload Error:', err);
+    console.error('Database Base64 Upload Error:', err);
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to process base64 upload.',
+      message: err.message || 'Failed to process base64 upload to database.',
     });
   }
 };
