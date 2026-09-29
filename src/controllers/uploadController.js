@@ -31,7 +31,7 @@ const ALLOWED_MIME_TYPES = {
 export const sanitizeFolder = (folderName) => {
   if (!folderName || typeof folderName !== 'string') return 'general';
   const clean = folderName.toLowerCase().replace(/[^a-z0-9_-]/g, '');
-  const allowedFolders = ['products', 'categories', 'banners', 'showcases', 'profiles', 'general'];
+  const allowedFolders = ['products', 'categories', 'subcategories', 'banners', 'showcases', 'profiles', 'general'];
   return allowedFolders.includes(clean) ? clean : 'general';
 };
 
