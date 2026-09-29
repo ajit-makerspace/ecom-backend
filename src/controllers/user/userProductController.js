@@ -28,6 +28,7 @@ export const getStoreProducts = async (req, res) => {
         p.kit_discount_percentage AS "kitDiscountPercentage",
         (SELECT COUNT(*)::int FROM kit_items ki WHERE ki.kit_id = p.id) AS "componentsCount",
         p.image_url AS "image",
+        p.images AS "images",
         p.description,
         p.created_at AS "createdAt"
       FROM products p
@@ -91,6 +92,7 @@ export const getStoreProducts = async (req, res) => {
       rating: parseFloat(p.rating || 5.0),
       reviewsCount: parseInt(p.reviewsCount || 0, 10),
       image: p.image || '/products/product-electronics.png',
+      images: Array.isArray(p.images) ? p.images : (typeof p.images === 'string' ? JSON.parse(p.images) : (p.image ? [p.image] : [])),
       specifications: typeof p.specifications === 'object' && p.specifications !== null ? p.specifications : {},
     }));
 
@@ -132,6 +134,7 @@ export const getStoreProductById = async (req, res) => {
         p.specifications,
         p.kit_discount_percentage AS "kitDiscountPercentage",
         p.image_url AS "image",
+        p.images AS "images",
         p.description,
         p.weight,
         p.created_at AS "createdAt"
@@ -155,6 +158,7 @@ export const getStoreProductById = async (req, res) => {
       rating: parseFloat(prod.rating || 5.0),
       reviewsCount: parseInt(prod.reviewsCount || 0, 10),
       image: prod.image || '/products/product-electronics.png',
+      images: Array.isArray(prod.images) ? prod.images : (typeof prod.images === 'string' ? JSON.parse(prod.images) : (prod.image ? [prod.image] : [])),
       specifications: typeof prod.specifications === 'object' && prod.specifications !== null ? prod.specifications : {},
       components: [],
       totalComponentPrice: 0,

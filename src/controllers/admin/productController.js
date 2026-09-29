@@ -54,6 +54,7 @@ export const getProducts = async (req, res) => {
         p.meta_title AS "metaTitle",
         p.meta_description AS "metaDescription",
         p.image_url AS "image",
+        p.images AS "images",
         p.status,
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt"
@@ -72,6 +73,7 @@ export const getProducts = async (req, res) => {
       weight: prod.weight ? parseFloat(prod.weight) : null,
       status: prod.status === 1 ? 'Active' : 'Inactive',
       specifications: typeof prod.specifications === 'object' && prod.specifications !== null ? prod.specifications : {},
+      images: Array.isArray(prod.images) ? prod.images : (typeof prod.images === 'string' ? JSON.parse(prod.images) : (prod.image ? [prod.image] : [])),
       kitItems: prod.kitItems || [],
     }));
 
@@ -111,6 +113,7 @@ export const createProduct = async (req, res) => {
       metaTitle,
       metaDescription,
       image,
+      images,
       status,
     } = req.body;
 
@@ -148,19 +151,28 @@ export const createProduct = async (req, res) => {
 
     const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 0;
 
+    let imageList = [];
+    if (Array.isArray(images) && images.length > 0) {
+      imageList = images.filter((img) => typeof img === 'string' && img.trim());
+    } else if (image && typeof image === 'string' && image.trim()) {
+      imageList = [image.trim()];
+    }
+    const primaryImage = imageList[0] || (typeof image === 'string' ? image.trim() : '');
+    const imagesJson = JSON.stringify(imageList);
+
     const { rows } = await db.query(
       `INSERT INTO products (
         category_id, sub_category_id, name, slug, sku, description, brand,
         price, old_price, weight, has_variants, is_featured, is_kit, specifications,
-        kit_discount_percentage, sort_order, meta_title, meta_description, image_url, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        kit_discount_percentage, sort_order, meta_title, meta_description, image_url, images, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       RETURNING 
         id, category_id AS "categoryId", sub_category_id AS "subCategoryId",
         name, slug, sku, description, brand, price, old_price AS "oldPrice",
         weight, has_variants AS "hasVariants", is_featured AS "isFeatured",
         is_kit AS "isKit", specifications, kit_discount_percentage AS "kitDiscountPercentage",
         sort_order AS "sortOrder", meta_title AS "metaTitle", meta_description AS "metaDescription",
-        image_url AS "image", status, created_at AS "createdAt", updated_at AS "updatedAt"`,
+        image_url AS "image", images, status, created_at AS "createdAt", updated_at AS "updatedAt"`,
       [
         catId,
         subCatId,
@@ -180,7 +192,8 @@ export const createProduct = async (req, res) => {
         numSortOrder,
         metaTitle || '',
         metaDescription || '',
-        image || '',
+        primaryImage,
+        imagesJson,
         statusInt,
       ]
     );
@@ -253,6 +266,7 @@ export const updateProduct = async (req, res) => {
       metaTitle,
       metaDescription,
       image,
+      images,
       status,
     } = req.body;
 
@@ -272,6 +286,15 @@ export const updateProduct = async (req, res) => {
     const numSortOrder = parseInt(sortOrder || '0', 10);
 
     const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 0;
+
+    let imageList = [];
+    if (Array.isArray(images) && images.length > 0) {
+      imageList = images.filter((img) => typeof img === 'string' && img.trim());
+    } else if (image && typeof image === 'string' && image.trim()) {
+      imageList = [image.trim()];
+    }
+    const primaryImage = imageList[0] || (typeof image === 'string' ? image.trim() : '');
+    const imagesJson = JSON.stringify(imageList);
 
     const { rows } = await db.query(
       `UPDATE products
@@ -294,16 +317,17 @@ export const updateProduct = async (req, res) => {
          meta_title = $16,
          meta_description = $17,
          image_url = $18,
-         status = $19,
+         images = $19,
+         status = $20,
          updated_at = NOW()
-       WHERE id = $20
+       WHERE id = $21
        RETURNING 
          id, category_id AS "categoryId", sub_category_id AS "subCategoryId",
          name, slug, sku, description, brand, price, old_price AS "oldPrice",
          weight, has_variants AS "hasVariants", is_featured AS "isFeatured",
          is_kit AS "isKit", specifications, kit_discount_percentage AS "kitDiscountPercentage",
          sort_order AS "sortOrder", meta_title AS "metaTitle", meta_description AS "metaDescription",
-         image_url AS "image", status, created_at AS "createdAt", updated_at AS "updatedAt"`,
+         image_url AS "image", images, status, created_at AS "createdAt", updated_at AS "updatedAt"`,
       [
         cleanName,
         catId,
@@ -322,7 +346,8 @@ export const updateProduct = async (req, res) => {
         numSortOrder,
         metaTitle || '',
         metaDescription || '',
-        image || '',
+        primaryImage,
+        imagesJson,
         statusInt,
         id,
       ]
