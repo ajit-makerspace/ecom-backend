@@ -14,6 +14,47 @@ const slugify = (text) => {
 // Kit Showcase type
 const KIT_SHOWCASE_TYPE = 1;
 
+// Helper to parse background image URLs from DB (handles JSON strings, Postgres array syntax, and plain strings)
+const parseBgImageUrl = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    return val.flatMap((item) => parseBgImageUrl(item)).filter(Boolean);
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === '{}' || trimmed === '[]') return [];
+
+    // Check JSON array
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.flatMap((item) => parseBgImageUrl(item)).filter(Boolean);
+        }
+      } catch (e) {}
+    }
+
+    // Check PostgreSQL array syntax {"item1","item2"}
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      const inner = trimmed.slice(1, -1).trim();
+      if (!inner) return [];
+      const matches = inner.match(/("(?:\\.|[^"\\])*"|[^",]+)(?=\s*,|\s*$)/g) || [];
+      return matches
+        .map((s) => s.replace(/^"|"$/g, '').replace(/\\"/g, '"').trim())
+        .filter(Boolean);
+    }
+
+    return [trimmed];
+  }
+  return [];
+};
+
+// Helper to format background image URLs for DB (persists clean JSON string or null)
+const formatBgImageUrlForDb = (val) => {
+  const parsed = parseBgImageUrl(val);
+  return parsed.length > 0 ? JSON.stringify(parsed) : null;
+};
+
 // 1. Get All Kit Showcases (Admin)
 export const getKitShowcases = async (req, res) => {
   try {
@@ -46,6 +87,7 @@ export const getKitShowcases = async (req, res) => {
 
     const showcases = rows.map((s) => ({
       ...s,
+      bgImageUrl: parseBgImageUrl(s.bgImageUrl),
       status: s.status === 1 ? 'Active' : 'Inactive',
       products: Array.isArray(s.products) ? s.products : [],
       productCount: Array.isArray(s.products) ? s.products.length : 0,
@@ -95,6 +137,7 @@ export const getPublicKitShowcases = async (req, res) => {
 
     const showcases = rows.map((s) => ({
       ...s,
+      bgImageUrl: parseBgImageUrl(s.bgImageUrl),
       products: Array.isArray(s.products) ? s.products : [],
     }));
 
@@ -158,6 +201,8 @@ export const creatKitShowcase = async (req, res) => {
     const productsJson = Array.isArray(products)
       ? JSON.stringify(products)
       : '[]';
+
+    const bgImageDbValue = formatBgImageUrlForDb(bgImageUrl);
 
     // Always force Kit Showcase type
     const typeInt = KIT_SHOWCASE_TYPE;
@@ -224,7 +269,7 @@ export const creatKitShowcase = async (req, res) => {
         badgeText || '',
         accentColor || '#0071e3',
         logoUrl || null,
-        bgImageUrl || null,
+        bgImageDbValue,
         shopLink ||
           `/user/products?kit=${encodeURIComponent(cleanName)}`,
         productsJson,
@@ -236,6 +281,7 @@ export const creatKitShowcase = async (req, res) => {
 
     const created = rows[0];
 
+    created.bgImageUrl = parseBgImageUrl(created.bgImageUrl);
     created.status = created.status === 1 ? 'Active' : 'Inactive';
 
     created.products = Array.isArray(created.products)
@@ -318,6 +364,8 @@ export const updateKitShowcase = async (req, res) => {
       ? JSON.stringify(products)
       : '[]';
 
+    const bgImageDbValue = formatBgImageUrlForDb(bgImageUrl);
+
     const { rows } = await db.query(
       `
       UPDATE brand_showcases
@@ -364,7 +412,7 @@ export const updateKitShowcase = async (req, res) => {
         badgeText || '',
         accentColor || '#0071e3',
         logoUrl || null,
-        bgImageUrl || null,
+        bgImageDbValue,
         shopLink ||
           `/user/products?kit=${encodeURIComponent(cleanName)}`,
         productsJson,
@@ -384,6 +432,7 @@ export const updateKitShowcase = async (req, res) => {
 
     const updated = rows[0];
 
+    updated.bgImageUrl = parseBgImageUrl(updated.bgImageUrl);
     updated.status = updated.status === 1 ? 'Active' : 'Inactive';
 
     updated.products = Array.isArray(updated.products)

@@ -10,6 +10,47 @@ const slugify = (text) => {
     .replace(/^-+|-+$/g, '');
 };
 
+// Helper to parse background image URLs from DB (handles JSON strings, Postgres array syntax, and plain strings)
+const parseBgImageUrl = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    return val.flatMap((item) => parseBgImageUrl(item)).filter(Boolean);
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === '{}' || trimmed === '[]') return [];
+
+    // Check JSON array
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.flatMap((item) => parseBgImageUrl(item)).filter(Boolean);
+        }
+      } catch (e) {}
+    }
+
+    // Check PostgreSQL array syntax {"item1","item2"}
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      const inner = trimmed.slice(1, -1).trim();
+      if (!inner) return [];
+      const matches = inner.match(/("(?:\\.|[^"\\])*"|[^",]+)(?=\s*,|\s*$)/g) || [];
+      return matches
+        .map((s) => s.replace(/^"|"$/g, '').replace(/\\"/g, '"').trim())
+        .filter(Boolean);
+    }
+
+    return [trimmed];
+  }
+  return [];
+};
+
+// Helper to format background image URLs for DB (persists clean JSON string or null)
+const formatBgImageUrlForDb = (val) => {
+  const parsed = parseBgImageUrl(val);
+  return parsed.length > 0 ? JSON.stringify(parsed) : null;
+};
+
 // 1. Get All Brand Showcases (Admin)
 export const getShowcases = async (req, res) => {
   try {
@@ -28,15 +69,18 @@ export const getShowcases = async (req, res) => {
         products,
         sort_order AS "sortOrder",
         status,
+        type,
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM brand_showcases
       WHERE status != 2
+        AND (type = 0 OR type IS NULL)
       ORDER BY sort_order ASC, id ASC
     `);
 
     const showcases = rows.map((s) => ({
       ...s,
+      bgImageUrl: parseBgImageUrl(s.bgImageUrl),
       status: s.status === 1 ? 'Active' : 'Inactive',
       products: Array.isArray(s.products) ? s.products : [],
       productCount: Array.isArray(s.products) ? s.products.length : 0,
@@ -56,7 +100,8 @@ export const getShowcases = async (req, res) => {
 // 2. Get Public Active Showcases (Storefront rotation)
 export const getPublicShowcases = async (req, res) => {
   try {
-    const { rows } = await db.query(`
+    const typeParam = req.query.type;
+    let query = `
       SELECT 
         id,
         brand_key AS "brandKey",
@@ -69,14 +114,27 @@ export const getPublicShowcases = async (req, res) => {
         bg_image_url AS "bgImageUrl",
         shop_link AS "shopLink",
         products,
-        sort_order AS "sortOrder"
+        sort_order AS "sortOrder",
+        type
       FROM brand_showcases
       WHERE status = 1
-      ORDER BY sort_order ASC, id ASC
-    `);
+    `;
+    const params = [];
+
+    if (typeParam !== undefined && typeParam !== null) {
+      params.push(parseInt(typeParam, 10));
+      query += ` AND type = $1`;
+    } else {
+      query += ` AND (type = 0 OR type IS NULL)`;
+    }
+
+    query += ` ORDER BY sort_order ASC, id ASC`;
+
+    const { rows } = await db.query(query, params);
 
     const showcases = rows.map((s) => ({
       ...s,
+      bgImageUrl: parseBgImageUrl(s.bgImageUrl),
       products: Array.isArray(s.products) ? s.products : [],
     }));
 
@@ -121,14 +179,15 @@ export const createShowcase = async (req, res) => {
     const statusInt = (status === 1 || status === '1' || status === true || String(status || 'Active').toLowerCase() === 'active') ? 1 : 0;
     const orderInt = parseInt(sortOrder, 10) || 0;
     const productsJson = Array.isArray(products) ? JSON.stringify(products) : '[]';
+    const bgImageDbValue = formatBgImageUrlForDb(bgImageUrl);
 
     const { rows } = await db.query(
       `INSERT INTO brand_showcases
-       (brand_key, name, tagline, description, badge_text, accent_color, logo_url, bg_image_url, shop_link, products, sort_order, status, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, NOW())
+       (brand_key, name, tagline, description, badge_text, accent_color, logo_url, bg_image_url, shop_link, products, sort_order, status, type, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, 0, NOW())
        RETURNING id, brand_key AS "brandKey", name, tagline, description, badge_text AS "badgeText", 
                  accent_color AS "accentColor", logo_url AS "logoUrl", bg_image_url AS "bgImageUrl", 
-                 shop_link AS "shopLink", products, sort_order AS "sortOrder", status, created_at AS "createdAt"`,
+                 shop_link AS "shopLink", products, sort_order AS "sortOrder", status, type, created_at AS "createdAt"`,
       [
         finalBrandKey,
         cleanName,
@@ -137,7 +196,7 @@ export const createShowcase = async (req, res) => {
         badgeText || '',
         accentColor || '#0071e3',
         logoUrl || null,
-        bgImageUrl || null,
+        bgImageDbValue,
         shopLink || `/user/products?brand=${encodeURIComponent(cleanName)}`,
         productsJson,
         orderInt,
@@ -146,6 +205,7 @@ export const createShowcase = async (req, res) => {
     );
 
     const created = rows[0];
+    created.bgImageUrl = parseBgImageUrl(created.bgImageUrl);
     created.status = created.status === 1 ? 'Active' : 'Inactive';
     created.products = Array.isArray(created.products) ? created.products : [];
 
@@ -179,7 +239,7 @@ export const updateShowcase = async (req, res) => {
       status,
     } = req.body;
 
-    const checkRes = await db.query('SELECT id, brand_key FROM brand_showcases WHERE id = $1 AND status != 2', [id]);
+    const checkRes = await db.query('SELECT id, brand_key FROM brand_showcases WHERE id = $1 AND status != 2 AND (type = 0 OR type IS NULL)', [id]);
     if (checkRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Brand showcase not found.' });
     }
@@ -189,6 +249,7 @@ export const updateShowcase = async (req, res) => {
     const statusInt = (status === 1 || status === '1' || status === true || String(status || 'Active').toLowerCase() === 'active') ? 1 : 0;
     const orderInt = parseInt(sortOrder, 10) || 0;
     const productsJson = Array.isArray(products) ? JSON.stringify(products) : '[]';
+    const bgImageDbValue = formatBgImageUrlForDb(bgImageUrl);
 
     const { rows } = await db.query(
       `UPDATE brand_showcases
@@ -204,11 +265,12 @@ export const updateShowcase = async (req, res) => {
            products = $10::jsonb,
            sort_order = $11,
            status = $12,
+           type = 0,
            updated_at = NOW()
-       WHERE id = $13
+       WHERE id = $13 AND (type = 0 OR type IS NULL)
        RETURNING id, brand_key AS "brandKey", name, tagline, description, badge_text AS "badgeText", 
                  accent_color AS "accentColor", logo_url AS "logoUrl", bg_image_url AS "bgImageUrl", 
-                 shop_link AS "shopLink", products, sort_order AS "sortOrder", status, updated_at AS "updatedAt"`,
+                 shop_link AS "shopLink", products, sort_order AS "sortOrder", status, type, updated_at AS "updatedAt"`,
       [
         finalBrandKey,
         cleanName,
@@ -217,7 +279,7 @@ export const updateShowcase = async (req, res) => {
         badgeText || '',
         accentColor || '#0071e3',
         logoUrl || null,
-        bgImageUrl || null,
+        bgImageDbValue,
         shopLink || `/user/products?brand=${encodeURIComponent(cleanName)}`,
         productsJson,
         orderInt,
@@ -227,6 +289,7 @@ export const updateShowcase = async (req, res) => {
     );
 
     const updated = rows[0];
+    updated.bgImageUrl = parseBgImageUrl(updated.bgImageUrl);
     updated.status = updated.status === 1 ? 'Active' : 'Inactive';
     updated.products = Array.isArray(updated.products) ? updated.products : [];
 
@@ -247,7 +310,7 @@ export const deleteShowcase = async (req, res) => {
     const { id } = req.params;
 
     const { rowCount } = await db.query(
-      `UPDATE brand_showcases SET status = 2, updated_at = NOW() WHERE id = $1 AND status != 2`,
+      `UPDATE brand_showcases SET status = 2, updated_at = NOW() WHERE id = $1 AND status != 2 AND (type = 0 OR type IS NULL)`,
       [id]
     );
 
