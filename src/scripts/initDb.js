@@ -72,6 +72,20 @@ export async function initDb() {
       );
     `);
 
+    // 4b. email_otps (For Passwordless / Email Verification Codes)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS email_otps (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        otp_code VARCHAR(10) NOT NULL,
+        purpose VARCHAR(50) NOT NULL DEFAULT 'login',
+        expires_at TIMESTAMPTZ NOT NULL,
+        is_used BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);');
+
     // 5. modules
     await db.query(`
       CREATE TABLE IF NOT EXISTS modules (
