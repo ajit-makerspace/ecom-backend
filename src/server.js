@@ -20,6 +20,7 @@ import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
 import userOrderRoutes from './routes/user/userOrderRoutes.js';
 import userProfileRoutes from './routes/user/userProfileRoutes.js';
+import userCartRoutes from './routes/user/userCartRoutes.js';
 
 import db from './config/db.js';
 
@@ -152,6 +153,7 @@ app.use('/api/user/auth', userAuthRoutes);
 app.use('/api/user', userProductRoutes);
 app.use('/api/user', userOrderRoutes);
 app.use('/api/user', userProfileRoutes);
+app.use('/api/user', userCartRoutes);
 
 // Centralized Error Handler
 app.use(errorHandler);
