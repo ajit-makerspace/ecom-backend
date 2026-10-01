@@ -14,6 +14,7 @@ import analyticsRoutes from './routes/admin/analyticsRoutes.js';
 import customerRoutes from './routes/admin/customerRoutes.js';
 import bannerRoutes from './routes/admin/bannerRoutes.js';
 import showcaseRoutes from './routes/admin/showcaseRoutes.js';
+import kitShowcaseRoutes from "./routes/admin/kitShowcaseRoutes.js"
 import uploadRoutes from './routes/uploadRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
@@ -22,6 +23,7 @@ import userOrderRoutes from './routes/user/userOrderRoutes.js';
 import userProfileRoutes from './routes/user/userProfileRoutes.js';
 
 import db from './config/db.js';
+// import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
 
 const app = express();
 const PORT = process.env.PORT || 3005;
@@ -146,6 +148,8 @@ app.use('/api/admin', analyticsRoutes);
 app.use('/api/admin', customerRoutes);
 app.use('/api/admin', bannerRoutes);
 app.use('/api/admin', showcaseRoutes);
+app.use('/api/admin', kitShowcaseRoutes);
+
 
 // Customer Storefront API Routes
 app.use('/api/user/auth', userAuthRoutes);
