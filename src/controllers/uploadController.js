@@ -12,7 +12,17 @@ const ALLOWED_MIME_TYPES = {
   'image/svg+xml': '.svg',
   'image/gif': '.gif',
   'application/pdf': '.pdf',
+  // Video (banners only, enforced in handleSingleUpload)
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
+  'video/ogg': '.ogg',
 };
+
+const VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/ogg']);
+const VIDEO_ALLOWED_FOLDERS = new Set(['banners']);
+
+const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB for images / PDFs (unchanged)
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB for videos
 
 // Safe folder sanitizer
 export const sanitizeFolder = (folderName) => {
@@ -30,16 +40,22 @@ const fileFilter = (req, file, cb) => {
   if (ALLOWED_MIME_TYPES[file.mimetype]) {
     cb(null, true);
   } else {
-    cb(new Error(`Unsupported file format (${file.mimetype}). Allowed formats: JPEG, PNG, WEBP, SVG, GIF, PDF`), false);
+    cb(
+      new Error(
+        `Unsupported file format (${file.mimetype}). Allowed formats: JPEG, PNG, WEBP, SVG, GIF, PDF, MP4, WEBM, OGG`
+      ),
+      false
+    );
   }
 };
 
-// Multer upload middleware instance (15MB limit)
+// Multer upload middleware instance.
+// Hard ceiling is the video limit; non-video files are re-checked against 15MB in the handler.
 export const multerUpload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 15 * 1024 * 1024, // 15 MB
+    fileSize: MAX_VIDEO_SIZE,
     files: 5,
   },
 });
@@ -57,6 +73,24 @@ export const handleSingleUpload = async (req, res) => {
     }
 
     const folder = sanitizeFolder(req.query?.folder || req.body?.folder);
+    const isVideo = VIDEO_MIME_TYPES.has(req.file.mimetype);
+
+    // Videos are only accepted for banners
+    if (isVideo && !VIDEO_ALLOWED_FOLDERS.has(folder)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Video uploads are only allowed for banners.',
+      });
+    }
+
+    // Keep the original 15MB limit for everything that is not a video
+    if (!isVideo && req.file.size > MAX_FILE_SIZE) {
+      return res.status(400).json({
+        success: false,
+        message: 'File size exceeds maximum allowed limit of 15MB.',
+      });
+    }
+
     const ext = ALLOWED_MIME_TYPES[req.file.mimetype] || path.extname(req.file.originalname).toLowerCase() || '.png';
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeName = `${folder}-${Date.now()}-${uniqueId}${ext}`;
@@ -118,10 +152,18 @@ export const handleBase64Upload = async (req, res) => {
       base64BufferData = matches[2];
     }
 
+    // Videos must go through the multipart upload (base64 would bloat the payload)
+    if (VIDEO_MIME_TYPES.has(mimeType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Videos must be uploaded as a file, not base64.',
+      });
+    }
+
     const ext = ALLOWED_MIME_TYPES[mimeType] || '.png';
     const buffer = Buffer.from(base64BufferData, 'base64');
 
-    if (buffer.length > 15 * 1024 * 1024) {
+    if (buffer.length > MAX_FILE_SIZE) {
       return res.status(400).json({
         success: false,
         message: 'File size exceeds maximum allowed limit of 15MB.',
