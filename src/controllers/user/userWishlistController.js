@@ -59,11 +59,8 @@ export const getWishlist = async (req, res) => {
          p.category_id,
          p.status,
          c.name AS "categoryName",
-         COALESCE(
-           p.image_url,
-           (SELECT file_url FROM product_images WHERE product_id = p.id AND status = 1 ORDER BY is_primary DESC, id ASC LIMIT 1),
-           '/placeholder-product.png'
-         ) AS image
+         COALESCE(p.image_url, '/products/product-electronics.png') AS image,
+         p.images
        FROM wishlist_items wi
        JOIN products p ON wi.product_id = p.id
        LEFT JOIN categories c ON p.category_id = c.id
@@ -72,12 +69,28 @@ export const getWishlist = async (req, res) => {
       [wishlist.id]
     );
 
+    const items = rows.map((r) => {
+      let imagesArr = [];
+      if (Array.isArray(r.images)) {
+        imagesArr = r.images;
+      } else if (typeof r.images === 'string') {
+        try { imagesArr = JSON.parse(r.images); } catch (e) { imagesArr = []; }
+      }
+      if (imagesArr.length === 0 && r.image) {
+        imagesArr = [r.image];
+      }
+      return {
+        ...r,
+        images: imagesArr,
+      };
+    });
+
     return res.json({
       success: true,
       wishlistId: wishlist.id,
-      items: rows,
-      productIds: rows.map((r) => r.id),
-      totalCount: rows.length,
+      items,
+      productIds: items.map((r) => r.id),
+      totalCount: items.length,
     });
   } catch (err) {
     console.error('getWishlist error:', err);
