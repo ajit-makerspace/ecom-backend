@@ -15,6 +15,8 @@ export const getBanners = async (req, res) => {
         image_url AS "imageUrl",
         sort_order AS "sortOrder",
         status,
+        starts_at AS "startsAt",
+        ends_at AS "endsAt",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM banners
@@ -39,6 +41,7 @@ export const getBanners = async (req, res) => {
 };
 
 // 2. Get Public Active Banners (Storefront)
+// Only returns banners that are status=1 AND within the active festival/limited-time window
 export const getPublicBanners = async (req, res) => {
   try {
     const { rows } = await db.query(`
@@ -51,9 +54,13 @@ export const getPublicBanners = async (req, res) => {
         secondary_text AS "secondaryText",
         secondary_link AS "secondaryLink",
         image_url AS "imageUrl",
-        sort_order AS "sortOrder"
+        sort_order AS "sortOrder",
+        starts_at AS "startsAt",
+        ends_at AS "endsAt"
       FROM banners
       WHERE status = 1
+        AND (starts_at IS NULL OR starts_at <= NOW())
+        AND (ends_at IS NULL OR ends_at >= NOW())
       ORDER BY sort_order ASC, id ASC
     `);
 
@@ -81,6 +88,8 @@ export const createBanner = async (req, res) => {
       imageUrl,
       sortOrder,
       status,
+      startsAt,
+      endsAt,
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -93,14 +102,17 @@ export const createBanner = async (req, res) => {
 
     const statusInt = (status === 1 || status === '1' || status === true || String(status || 'Active').toLowerCase() === 'active') ? 1 : 0;
     const orderInt = parseInt(sortOrder, 10) || 0;
+    const finalStartsAt = startsAt ? new Date(startsAt) : (req.body.starts_at ? new Date(req.body.starts_at) : null);
+    const finalEndsAt = endsAt ? new Date(endsAt) : (req.body.ends_at ? new Date(req.body.ends_at) : null);
 
     const { rows } = await db.query(
       `INSERT INTO banners 
-       (title, subtitle, cta_text, cta_link, secondary_text, secondary_link, image_url, sort_order, status, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+       (title, subtitle, cta_text, cta_link, secondary_text, secondary_link, image_url, sort_order, status, starts_at, ends_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
        RETURNING id, title, subtitle, cta_text AS "ctaText", cta_link AS "ctaLink", 
                  secondary_text AS "secondaryText", secondary_link AS "secondaryLink", 
-                 image_url AS "imageUrl", sort_order AS "sortOrder", status, created_at AS "createdAt"`,
+                 image_url AS "imageUrl", sort_order AS "sortOrder", status, 
+                 starts_at AS "startsAt", ends_at AS "endsAt", created_at AS "createdAt"`,
       [
         title.trim(),
         subtitle || '',
@@ -111,6 +123,8 @@ export const createBanner = async (req, res) => {
         imageUrl.trim(),
         orderInt,
         statusInt,
+        finalStartsAt,
+        finalEndsAt,
       ]
     );
 
@@ -142,6 +156,8 @@ export const updateBanner = async (req, res) => {
       imageUrl,
       sortOrder,
       status,
+      startsAt,
+      endsAt,
     } = req.body;
 
     const checkRes = await db.query('SELECT id FROM banners WHERE id = $1 AND status != 2', [id]);
@@ -151,6 +167,8 @@ export const updateBanner = async (req, res) => {
 
     const statusInt = (status === 1 || status === '1' || status === true || String(status || 'Active').toLowerCase() === 'active') ? 1 : 0;
     const orderInt = parseInt(sortOrder, 10) || 0;
+    const finalStartsAt = startsAt ? new Date(startsAt) : (req.body.starts_at ? new Date(req.body.starts_at) : null);
+    const finalEndsAt = endsAt ? new Date(endsAt) : (req.body.ends_at ? new Date(req.body.ends_at) : null);
 
     const { rows } = await db.query(
       `UPDATE banners
@@ -163,11 +181,14 @@ export const updateBanner = async (req, res) => {
            image_url = $7,
            sort_order = $8,
            status = $9,
+           starts_at = $10,
+           ends_at = $11,
            updated_at = NOW()
-       WHERE id = $10
+       WHERE id = $12
        RETURNING id, title, subtitle, cta_text AS "ctaText", cta_link AS "ctaLink", 
                  secondary_text AS "secondaryText", secondary_link AS "secondaryLink", 
-                 image_url AS "imageUrl", sort_order AS "sortOrder", status, updated_at AS "updatedAt"`,
+                 image_url AS "imageUrl", sort_order AS "sortOrder", status, 
+                 starts_at AS "startsAt", ends_at AS "endsAt", updated_at AS "updatedAt"`,
       [
         title ? title.trim() : 'Banner',
         subtitle || '',
@@ -178,6 +199,8 @@ export const updateBanner = async (req, res) => {
         imageUrl ? imageUrl.trim() : '/hero-banner-1.png',
         orderInt,
         statusInt,
+        finalStartsAt,
+        finalEndsAt,
         id,
       ]
     );
