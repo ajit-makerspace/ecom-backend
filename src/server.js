@@ -23,6 +23,7 @@ import userOrderRoutes from './routes/user/userOrderRoutes.js';
 import userProfileRoutes from './routes/user/userProfileRoutes.js';
 import userCartRoutes from './routes/user/userCartRoutes.js';
 import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
+import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -162,6 +163,7 @@ app.use('/api/user', userOrderRoutes);
 app.use('/api/user', userProfileRoutes);
 app.use('/api/user', userCartRoutes);
 app.use('/api/user', userWishlistRoutes);
+app.use('/api/user', userEnquiryRoutes);
 
 // Centralized Error Handler
 app.use(errorHandler);
