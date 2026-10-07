@@ -22,6 +22,7 @@ import userProductRoutes from './routes/user/userProductRoutes.js';
 import userOrderRoutes from './routes/user/userOrderRoutes.js';
 import userProfileRoutes from './routes/user/userProfileRoutes.js';
 import userCartRoutes from './routes/user/userCartRoutes.js';
+import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -33,6 +34,8 @@ const PORT = process.env.PORT || 3005;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
 
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
 
@@ -158,13 +161,37 @@ app.use('/api/user', userProductRoutes);
 app.use('/api/user', userOrderRoutes);
 app.use('/api/user', userProfileRoutes);
 app.use('/api/user', userCartRoutes);
+app.use('/api/user', userWishlistRoutes);
 
 // Centralized Error Handler
 app.use(errorHandler);
 
 // Start Express Server
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Express Backend Server running on port ${PORT} (Listening on 0.0.0.0 for local network access)`);
   console.log(`🛒 Storefront API: http://localhost:${PORT}/api/user`);
   console.log(`⚙️ Admin API: http://localhost:${PORT}/api/admin`);
 });
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} in use, retrying in 1s...`);
+    setTimeout(() => {
+      server.close();
+      server.listen(PORT, '0.0.0.0');
+    }, 1000);
+  } else {
+    console.error('Server error:', err);
+  }
+});
+
+const gracefulShutdown = () => {
+  server.close(() => {
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(0), 1000).unref();
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+process.once('SIGUSR2', gracefulShutdown);

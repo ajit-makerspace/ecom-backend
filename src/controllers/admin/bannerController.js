@@ -91,6 +91,8 @@ export const getBanners = async (req, res) => {
       SELECT
         ${BANNER_COLUMNS},
         status,
+        starts_at AS "startsAt",
+        ends_at AS "endsAt",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM banners
@@ -119,6 +121,8 @@ export const getPublicBanners = async (req, res) => {
       SELECT ${BANNER_COLUMNS}
       FROM banners
       WHERE status = 1
+        AND (starts_at IS NULL OR starts_at <= NOW())
+        AND (ends_at IS NULL OR ends_at >= NOW())
       ORDER BY sort_order ASC, id ASC
     `);
 
@@ -146,6 +150,8 @@ export const createBanner = async (req, res) => {
       videoUrl,
       sortOrder,
       status,
+      startsAt,
+      endsAt,
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -159,6 +165,8 @@ export const createBanner = async (req, res) => {
 
     const statusInt = toStatusInt(status);
     const orderInt = parseInt(sortOrder, 10) || 0;
+    const finalStartsAt = startsAt ? new Date(startsAt) : (req.body.starts_at ? new Date(req.body.starts_at) : null);
+    const finalEndsAt = endsAt ? new Date(endsAt) : (req.body.ends_at ? new Date(req.body.ends_at) : null);
 
     const { rows } = await db.query(
       `INSERT INTO banners
@@ -178,6 +186,8 @@ export const createBanner = async (req, res) => {
         media.videoUrl,
         orderInt,
         statusInt,
+        finalStartsAt,
+        finalEndsAt,
       ]
     );
 
@@ -213,6 +223,8 @@ export const updateBanner = async (req, res) => {
       videoUrl,
       sortOrder,
       status,
+      startsAt,
+      endsAt,
     } = req.body;
 
     const checkRes = await db.query('SELECT id FROM banners WHERE id = $1 AND status != 2', [id]);
@@ -227,6 +239,8 @@ export const updateBanner = async (req, res) => {
 
     const statusInt = toStatusInt(status);
     const orderInt = parseInt(sortOrder, 10) || 0;
+    const finalStartsAt = startsAt ? new Date(startsAt) : (req.body.starts_at ? new Date(req.body.starts_at) : null);
+    const finalEndsAt = endsAt ? new Date(endsAt) : (req.body.ends_at ? new Date(req.body.ends_at) : null);
 
     const { rows } = await db.query(
       `UPDATE banners
@@ -256,6 +270,8 @@ export const updateBanner = async (req, res) => {
         media.videoUrl,
         orderInt,
         statusInt,
+        finalStartsAt,
+        finalEndsAt,
         id,
       ]
     );
