@@ -24,6 +24,7 @@ import userProfileRoutes from './routes/user/userProfileRoutes.js';
 import userCartRoutes from './routes/user/userCartRoutes.js';
 import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
 import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
+import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -173,6 +174,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Express Backend Server running on port ${PORT} (Listening on 0.0.0.0 for local network access)`);
   console.log(`🛒 Storefront API: http://localhost:${PORT}/api/user`);
   console.log(`⚙️ Admin API: http://localhost:${PORT}/api/admin`);
+  ensureReviewsTable();
 });
 
 server.on('error', (err) => {
