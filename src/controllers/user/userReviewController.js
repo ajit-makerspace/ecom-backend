@@ -169,7 +169,7 @@ export async function addProductReview(req, res) {
       req.user.email?.split('@')[0] ||
       'Verified Customer';
 
-    const reviewTitle = (title && title.trim()) || product.name || 'Verified Review';
+    const reviewTitle = (title && title.trim()) || 'Verified Review';
 
     // Insert new review
     const { rows: inserted } = await db.query(
