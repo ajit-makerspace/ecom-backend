@@ -17,6 +17,7 @@ import showcaseRoutes from './routes/admin/showcaseRoutes.js';
 import kitShowcaseRoutes from "./routes/admin/kitShowcaseRoutes.js"
 import chatbotRoutes from './routes/admin/chatbotRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import brandLogoRoutes from './routes/admin/brandLogoRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -159,6 +160,9 @@ app.use('/api/admin', bannerRoutes);
 app.use('/api/admin', showcaseRoutes);
 app.use('/api/admin', kitShowcaseRoutes);
 app.use('/api/admin', chatbotRoutes);
+app.use('/api/admin', brandLogoRoutes);
+
+
 
 // Customer Storefront API Routes
 app.use('/api/user/auth', userAuthRoutes);
@@ -169,6 +173,7 @@ app.use('/api/user', userCartRoutes);
 app.use('/api/user', userWishlistRoutes);
 app.use('/api/user', userEnquiryRoutes);
 app.use('/api/user', userChatbotRoutes);
+
 
 // Centralized Error Handler
 app.use(errorHandler);
