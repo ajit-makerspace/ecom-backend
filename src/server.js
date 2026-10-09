@@ -15,6 +15,7 @@ import customerRoutes from './routes/admin/customerRoutes.js';
 import bannerRoutes from './routes/admin/bannerRoutes.js';
 import showcaseRoutes from './routes/admin/showcaseRoutes.js';
 import kitShowcaseRoutes from "./routes/admin/kitShowcaseRoutes.js"
+import chatbotRoutes from './routes/admin/chatbotRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
@@ -24,7 +25,9 @@ import userProfileRoutes from './routes/user/userProfileRoutes.js';
 import userCartRoutes from './routes/user/userCartRoutes.js';
 import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
 import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
+import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
+import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -155,7 +158,7 @@ app.use('/api/admin', customerRoutes);
 app.use('/api/admin', bannerRoutes);
 app.use('/api/admin', showcaseRoutes);
 app.use('/api/admin', kitShowcaseRoutes);
-
+app.use('/api/admin', chatbotRoutes);
 
 // Customer Storefront API Routes
 app.use('/api/user/auth', userAuthRoutes);
@@ -165,6 +168,7 @@ app.use('/api/user', userProfileRoutes);
 app.use('/api/user', userCartRoutes);
 app.use('/api/user', userWishlistRoutes);
 app.use('/api/user', userEnquiryRoutes);
+app.use('/api/user', userChatbotRoutes);
 
 // Centralized Error Handler
 app.use(errorHandler);
@@ -175,6 +179,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🛒 Storefront API: http://localhost:${PORT}/api/user`);
   console.log(`⚙️ Admin API: http://localhost:${PORT}/api/admin`);
   ensureReviewsTable();
+  ensureChatbotTable();
 });
 
 server.on('error', (err) => {

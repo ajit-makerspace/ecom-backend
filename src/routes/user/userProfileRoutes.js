@@ -11,13 +11,11 @@ import { authenticateToken, requireCustomer } from '../../middleware/auth.js';
 
 const router = express.Router();
 
-router.use(authenticateToken);
-
-router.get('/profile', getProfile);
-router.put('/profile', updateProfile);
-router.get('/addresses', getAddresses);
-router.post('/addresses', createAddress);
-router.put('/addresses/:id', updateAddress);
-router.delete('/addresses/:id', deleteAddress);
+router.get('/profile', authenticateToken, getProfile);
+router.put('/profile', authenticateToken, updateProfile);
+router.get('/addresses', authenticateToken, getAddresses);
+router.post('/addresses', authenticateToken, createAddress);
+router.put('/addresses/:id', authenticateToken, updateAddress);
+router.delete('/addresses/:id', authenticateToken, deleteAddress);
 
 export default router;
