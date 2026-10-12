@@ -1,9 +1,18 @@
+
 import db from '../../config/db.js';
 
 // Get Public Store Products for Customer Browsing
 export const getStoreProducts = async (req, res) => {
   try {
-    const { category, search, sort = 'featured', is_kit, limit = 100, offset = 0 } = req.query;
+    const {
+      category,
+      search,
+      brandId,
+      sort = 'featured',
+      is_kit,
+      limit = 100,
+      offset = 0,
+    } = req.query;
 
     let queryText = `
       SELECT 
@@ -16,7 +25,9 @@ export const getStoreProducts = async (req, res) => {
         c.slug AS "categorySlug",
         p.sub_category_id AS "subCategoryId",
         sc.name AS "subCategoryName",
-        p.brand,
+        p.brand_id AS "brandId",
+        bl.name AS brand,
+        bl.logo_url AS "brandLogoUrl",
         p.price,
         p.old_price AS "oldPrice",
         p.stock,
@@ -36,6 +47,7 @@ export const getStoreProducts = async (req, res) => {
       FROM products p
       JOIN categories c ON p.category_id = c.id AND c.status = 1
       LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status = 1
+      LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
       WHERE p.status = 1
     `;
 
@@ -60,9 +72,24 @@ export const getStoreProducts = async (req, res) => {
       queryText += ` AND (
         LOWER(p.name) LIKE $${params.length} OR 
         LOWER(p.description) LIKE $${params.length} OR 
-        LOWER(p.brand) LIKE $${params.length} OR
+        LOWER(COALESCE(bl.name, '')) LIKE $${params.length} OR
         LOWER(c.name) LIKE $${params.length}
       )`;
+    }
+
+    // Filter by Brand ID
+    if (brandId !== undefined && brandId !== '') {
+      const parsedBrandId = parseInt(brandId, 10);
+
+      if (Number.isNaN(parsedBrandId) || parsedBrandId <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid brandId.',
+        });
+      }
+
+      params.push(parsedBrandId);
+      queryText += ` AND p.brand_id = $${params.length}`;
     }
 
     // Sorting
@@ -94,8 +121,17 @@ export const getStoreProducts = async (req, res) => {
       rating: parseFloat(p.rating || 0),
       reviewsCount: parseInt(p.reviewsCount || 0, 10),
       image: p.image || '/products/product-electronics.png',
-      images: Array.isArray(p.images) ? p.images : (typeof p.images === 'string' ? JSON.parse(p.images) : (p.image ? [p.image] : [])),
-      specifications: typeof p.specifications === 'object' && p.specifications !== null ? p.specifications : {},
+      images: Array.isArray(p.images)
+        ? p.images
+        : typeof p.images === 'string'
+          ? JSON.parse(p.images)
+          : p.image
+            ? [p.image]
+            : [],
+      specifications:
+        typeof p.specifications === 'object' && p.specifications !== null
+          ? p.specifications
+          : {},
     }));
 
     return res.json({
@@ -105,7 +141,10 @@ export const getStoreProducts = async (req, res) => {
     });
   } catch (err) {
     console.error('Store Products Controller Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch catalog products.' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch catalog products.',
+    });
   }
 };
 
@@ -125,7 +164,9 @@ export const getStoreProductById = async (req, res) => {
         c.slug AS "categorySlug",
         p.sub_category_id AS "subCategoryId",
         sc.name AS "subCategoryName",
-        p.brand,
+        p.brand_id AS "brandId",
+        bl.name AS brand,
+        bl.logo_url AS "brandLogoUrl",
         p.price,
         p.old_price AS "oldPrice",
         p.stock,
@@ -145,16 +186,21 @@ export const getStoreProductById = async (req, res) => {
       FROM products p
       JOIN categories c ON p.category_id = c.id
       LEFT JOIN subcategories sc ON p.sub_category_id = sc.id
+      LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
       WHERE (p.id::text = $1 OR p.slug = $1) AND p.status = 1
       LIMIT 1`,
       [id]
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Product not found.' });
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found.',
+      });
     }
 
     const prod = rows[0];
+
     const product = {
       ...prod,
       price: parseFloat(prod.price || 0),
@@ -162,8 +208,17 @@ export const getStoreProductById = async (req, res) => {
       rating: parseFloat(prod.rating || 0),
       reviewsCount: parseInt(prod.reviewsCount || 0, 10),
       image: prod.image || '/products/product-electronics.png',
-      images: Array.isArray(prod.images) ? prod.images : (typeof prod.images === 'string' ? JSON.parse(prod.images) : (prod.image ? [prod.image] : [])),
-      specifications: typeof prod.specifications === 'object' && prod.specifications !== null ? prod.specifications : {},
+      images: Array.isArray(prod.images)
+        ? prod.images
+        : typeof prod.images === 'string'
+          ? JSON.parse(prod.images)
+          : prod.image
+            ? [prod.image]
+            : [],
+      specifications:
+        typeof prod.specifications === 'object' && prod.specifications !== null
+          ? prod.specifications
+          : {},
       components: [],
       totalComponentPrice: 0,
       savings: 0,
@@ -181,7 +236,9 @@ export const getStoreProductById = async (req, res) => {
           p.name,
           p.slug,
           p.sku,
-          p.brand,
+          p.brand_id AS "brandId",
+          bl.name AS brand,
+          bl.logo_url AS "brandLogoUrl",
           p.price,
           p.old_price AS "oldPrice",
           p.image_url AS "image",
@@ -190,6 +247,7 @@ export const getStoreProductById = async (req, res) => {
           p.stock
         FROM kit_items ki
         JOIN products p ON ki.product_id = p.id
+        LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
         WHERE ki.kit_id = $1 AND p.status = 1
         ORDER BY ki.sort_order ASC, ki.id ASC`,
         [prod.id]
@@ -199,12 +257,23 @@ export const getStoreProductById = async (req, res) => {
         ...c,
         price: parseFloat(c.price || 0),
         oldPrice: c.oldPrice ? parseFloat(c.oldPrice) : null,
-        specifications: typeof c.specifications === 'object' && c.specifications !== null ? c.specifications : {},
+        specifications:
+          typeof c.specifications === 'object' && c.specifications !== null
+            ? c.specifications
+            : {},
       }));
 
-      const totalComponentPrice = components.reduce((sum, c) => sum + (c.price * c.quantity), 0);
+      const totalComponentPrice = components.reduce(
+        (sum, c) => sum + c.price * c.quantity,
+        0
+      );
+
       const savings = Math.max(0, totalComponentPrice - product.price);
-      const savingsPercentage = totalComponentPrice > 0 ? Math.round((savings / totalComponentPrice) * 100) : 0;
+
+      const savingsPercentage =
+        totalComponentPrice > 0
+          ? Math.round((savings / totalComponentPrice) * 100)
+          : 0;
 
       product.components = components;
       product.totalComponentPrice = parseFloat(totalComponentPrice.toFixed(2));
@@ -214,11 +283,22 @@ export const getStoreProductById = async (req, res) => {
       // If Single Product: Query which kits include this item for cross-selling
       const kitRes = await db.query(
         `SELECT 
-          p.id, p.name, p.slug, p.sku, p.price, p.old_price AS "oldPrice",
-          p.image_url AS "image", p.rating, p.reviews_count AS "reviewsCount",
+          p.id,
+          p.name,
+          p.slug,
+          p.sku,
+          p.brand_id AS "brandId",
+          bl.name AS brand,
+          bl.logo_url AS "brandLogoUrl",
+          p.price,
+          p.old_price AS "oldPrice",
+          p.image_url AS "image",
+          p.rating,
+          p.reviews_count AS "reviewsCount",
           ki.quantity AS "includedQuantity"
         FROM kit_items ki
         JOIN products p ON ki.kit_id = p.id
+        LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
         WHERE ki.product_id = $1 AND p.status = 1 AND p.is_kit = true
         ORDER BY p.is_featured DESC, p.id DESC`,
         [prod.id]
@@ -234,12 +314,24 @@ export const getStoreProductById = async (req, res) => {
     // Fetch related products in the same category
     const relRes = await db.query(
       `SELECT 
-        p.id, p.name, p.slug, p.sku, p.price, p.old_price AS "oldPrice",
-        p.rating, p.reviews_count AS "reviewsCount", p.image_url AS "image",
+        p.id,
+        p.name,
+        p.slug,
+        p.sku,
+        p.brand_id AS "brandId",
+        bl.name AS brand,
+        bl.logo_url AS "brandLogoUrl",
+        p.price,
+        p.old_price AS "oldPrice",
+        p.rating,
+        p.reviews_count AS "reviewsCount",
+        p.image_url AS "image",
         p.is_kit AS "isKit",
-        c.name AS "categoryName", c.slug AS "categorySlug"
+        c.name AS "categoryName",
+        c.slug AS "categorySlug"
        FROM products p
        JOIN categories c ON p.category_id = c.id
+       LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
        WHERE p.category_id = $1 AND p.id != $2 AND p.status = 1
        LIMIT 4`,
       [product.categoryId, product.id]
@@ -261,7 +353,10 @@ export const getStoreProductById = async (req, res) => {
     });
   } catch (err) {
     console.error('Store Product Detail Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch product details.' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch product details.',
+    });
   }
 };
 
@@ -277,7 +372,9 @@ export const getStoreKits = async (req, res) => {
         p.category_id AS "categoryId",
         c.name AS "categoryName",
         c.slug AS "categorySlug",
-        p.brand,
+        p.brand_id AS "brandId",
+        bl.name AS brand,
+        bl.logo_url AS "brandLogoUrl",
         p.price,
         p.old_price AS "oldPrice",
         p.stock,
@@ -295,6 +392,9 @@ export const getStoreKits = async (req, res) => {
               'id', cp.id,
               'name', cp.name,
               'sku', cp.sku,
+              'brandId', cp.brand_id,
+              'brand', cbl.name,
+              'brandLogoUrl', cbl.logo_url,
               'price', cp.price::numeric,
               'quantity', ki.quantity,
               'image', cp.image_url,
@@ -303,10 +403,12 @@ export const getStoreKits = async (req, res) => {
           )
           FROM kit_items ki
           JOIN products cp ON ki.product_id = cp.id
+          LEFT JOIN public.brand_logos cbl ON cp.brand_id = cbl.id
           WHERE ki.kit_id = p.id
         ) AS components
       FROM products p
       JOIN categories c ON p.category_id = c.id
+      LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
       WHERE p.is_kit = true AND p.status = 1
       ORDER BY p.is_featured DESC, p.sort_order ASC, p.id DESC
     `);
@@ -316,10 +418,19 @@ export const getStoreKits = async (req, res) => {
         ...comp,
         price: parseFloat(comp.price || 0),
       }));
-      const totalComponentPrice = components.reduce((sum, c) => sum + (c.price * (c.quantity || 1)), 0);
+
+      const totalComponentPrice = components.reduce(
+        (sum, c) => sum + c.price * (c.quantity || 1),
+        0
+      );
+
       const kitPrice = parseFloat(k.price || 0);
       const savings = Math.max(0, totalComponentPrice - kitPrice);
-      const savingsPercentage = totalComponentPrice > 0 ? Math.round((savings / totalComponentPrice) * 100) : 0;
+
+      const savingsPercentage =
+        totalComponentPrice > 0
+          ? Math.round((savings / totalComponentPrice) * 100)
+          : 0;
 
       return {
         ...k,
@@ -328,7 +439,10 @@ export const getStoreKits = async (req, res) => {
         rating: parseFloat(k.rating || 5.0),
         reviewsCount: parseInt(k.reviewsCount || 0, 10),
         image: k.image || '/products/product-electronics.png',
-        specifications: typeof k.specifications === 'object' && k.specifications !== null ? k.specifications : {},
+        specifications:
+          typeof k.specifications === 'object' && k.specifications !== null
+            ? k.specifications
+            : {},
         components,
         componentsCount: components.length,
         totalComponentPrice: parseFloat(totalComponentPrice.toFixed(2)),
@@ -344,7 +458,10 @@ export const getStoreKits = async (req, res) => {
     });
   } catch (err) {
     console.error('Store Kits Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch kits.' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch kits.',
+    });
   }
 };
 
@@ -372,6 +489,9 @@ export const getStoreCategories = async (req, res) => {
     });
   } catch (err) {
     console.error('Store Categories Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch store categories.' });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch store categories.',
+    });
   }
 };
