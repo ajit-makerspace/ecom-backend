@@ -242,40 +242,76 @@ export const updateBanner = async (req, res) => {
     const finalStartsAt = startsAt ? new Date(startsAt) : (req.body.starts_at ? new Date(req.body.starts_at) : null);
     const finalEndsAt = endsAt ? new Date(endsAt) : (req.body.ends_at ? new Date(req.body.ends_at) : null);
 
-    const { rows } = await db.query(
-      `UPDATE banners
-       SET title = $1,
-           subtitle = $2,
-           cta_text = $3,
-           cta_link = $4,
-           secondary_text = $5,
-           secondary_link = $6,
-           media_type = $7,
-           image_url = $8,
-           video_url = $9,
-           sort_order = $10,
-           status = $11,
-           updated_at = NOW()
-       WHERE id = $12
-       RETURNING ${BANNER_COLUMNS}, status, updated_at AS "updatedAt"`,
-      [
-        title ? title.trim() : 'Banner',
-        subtitle || '',
-        ctaText || 'Explore Hardware',
-        ctaLink || '/user/products',
-        secondaryText || '',
-        secondaryLink || '',
-        media.mediaType,
-        media.imageUrl,
-        media.videoUrl,
-        orderInt,
-        statusInt,
-        finalStartsAt,
-        finalEndsAt,
-        id,
-      ]
-    );
+    // const { rows } = await db.query(
+    //   `UPDATE banners
+    //    SET title = $1,
+    //        subtitle = $2,
+    //        cta_text = $3,
+    //        cta_link = $4,
+    //        secondary_text = $5,
+    //        secondary_link = $6,
+    //        media_type = $7,
+    //        image_url = $8,
+    //        video_url = $9,
+    //        sort_order = $10,
+    //        status = $11,
+    //        updated_at = NOW()
+    //    WHERE id = $12
+    //    RETURNING ${BANNER_COLUMNS}, status, updated_at AS "updatedAt"`,
+    //   [
+    //     title ? title.trim() : 'Banner',
+    //     subtitle || '',
+    //     ctaText || 'Explore Hardware',
+    //     ctaLink || '/user/products',
+    //     secondaryText || '',
+    //     secondaryLink || '',
+    //     media.mediaType,
+    //     media.imageUrl,
+    //     media.videoUrl,
+    //     orderInt,
+    //     statusInt,
+    //     finalStartsAt,
+    //     finalEndsAt,
+    //     id,
+    //   ]
+    // );
 
+
+    const { rows } = await db.query(
+  `UPDATE banners
+   SET title = $1,
+       subtitle = $2,
+       cta_text = $3,
+       cta_link = $4,
+       secondary_text = $5,
+       secondary_link = $6,
+       media_type = $7,
+       image_url = $8,
+       video_url = $9,
+       sort_order = $10,
+       status = $11,
+       starts_at = $12,
+       ends_at = $13,
+       updated_at = NOW()
+   WHERE id = $14
+   RETURNING ${BANNER_COLUMNS}, status, updated_at AS "updatedAt"`,
+  [
+    title ? title.trim() : 'Banner',
+    subtitle || '',
+    ctaText || 'Explore Hardware',
+    ctaLink || '/user/products',
+    secondaryText || '',
+    secondaryLink || '',
+    media.mediaType,
+    media.imageUrl,
+    media.videoUrl,
+    orderInt,
+    statusInt,
+    finalStartsAt,
+    finalEndsAt,
+    id,
+  ]
+);
     const updated = rows[0];
     updated.status = updated.status === 1 ? 'Active' : 'Inactive';
 
