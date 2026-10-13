@@ -43,7 +43,8 @@ export const getStoreProducts = async (req, res) => {
         p.image_url AS "image",
         p.images AS "images",
         p.description,
-        p.created_at AS "createdAt"
+        p.created_at AS "createdAt",
+        COUNT(*) OVER()::int AS "totalCount"
       FROM products p
       JOIN categories c ON p.category_id = c.id AND c.status = 1
       LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status = 1
@@ -134,8 +135,14 @@ export const getStoreProducts = async (req, res) => {
           : {},
     }));
 
+    const totalCount =
+      rows.length > 0 && rows[0].totalCount
+        ? parseInt(rows[0].totalCount, 10)
+        : 0;
+
     return res.json({
       success: true,
+      totalCount,
       count: products.length,
       products,
     });
@@ -495,3 +502,117 @@ export const getStoreCategories = async (req, res) => {
     });
   }
 };
+
+// Live Store Search Autocomplete (products & categories directly from database)
+export const searchStoreProducts = async (req, res) => {
+  try {
+    const rawQuery = (req.query.q || req.query.search || '').trim();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 6, 1), 20);
+
+    if (!rawQuery) {
+      return res.json({
+        success: true,
+        query: '',
+        totalMatches: 0,
+        categories: [],
+        products: [],
+      });
+    }
+
+    const searchTerm = `%${rawQuery.toLowerCase()}%`;
+    const prefixTerm = `${rawQuery.toLowerCase()}%`;
+
+    // 1. Search products with total count using window function
+    const productQuery = `
+      SELECT 
+        p.id,
+        p.name,
+        p.slug,
+        p.sku,
+        p.price,
+        p.old_price AS "oldPrice",
+        p.image_url AS "image",
+        c.name AS "categoryName",
+        c.slug AS "categorySlug",
+        COALESCE((SELECT ROUND(AVG(pr.rating), 1) FROM product_reviews pr WHERE pr.product_id = p.id AND pr.status = 1), 0.0) AS rating,
+        COUNT(*) OVER()::int AS "totalMatches"
+      FROM products p
+      JOIN categories c ON p.category_id = c.id AND c.status = 1
+      LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status = 1
+      LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
+      WHERE p.status = 1
+        AND (
+          LOWER(p.name) LIKE $1 OR
+          LOWER(COALESCE(p.description, '')) LIKE $1 OR
+          LOWER(COALESCE(p.sku, '')) LIKE $1 OR
+          LOWER(c.name) LIKE $1 OR
+          LOWER(COALESCE(sc.name, '')) LIKE $1 OR
+          LOWER(COALESCE(bl.name, '')) LIKE $1
+        )
+      ORDER BY
+        CASE WHEN LOWER(p.name) LIKE $2 THEN 0 ELSE 1 END,
+        p.is_featured DESC,
+        p.id DESC
+      LIMIT $3
+    `;
+
+    // 2. Search matching categories
+    const categoryQuery = `
+      SELECT 
+        c.id, 
+        c.name, 
+        c.slug, 
+        COUNT(p.id)::int AS "productCount"
+      FROM categories c
+      JOIN products p ON p.category_id = c.id AND p.status = 1
+      WHERE c.status = 1
+        AND (
+          LOWER(c.name) LIKE $1 OR
+          LOWER(p.name) LIKE $1
+        )
+      GROUP BY c.id, c.name, c.slug
+      ORDER BY 
+        CASE WHEN LOWER(c.name) LIKE $1 THEN 0 ELSE 1 END,
+        "productCount" DESC
+      LIMIT 4
+    `;
+
+    const [productResult, categoryResult] = await Promise.all([
+      db.query(productQuery, [searchTerm, prefixTerm, limit]),
+      db.query(categoryQuery, [searchTerm]),
+    ]);
+
+    const totalMatches =
+      productResult.rows.length > 0 && productResult.rows[0].totalMatches
+        ? parseInt(productResult.rows[0].totalMatches, 10)
+        : 0;
+
+    const products = productResult.rows.map((p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      sku: p.sku,
+      price: parseFloat(p.price || 0),
+      oldPrice: p.oldPrice ? parseFloat(p.oldPrice) : null,
+      rating: parseFloat(p.rating || 0),
+      image: p.image || '/products/product-electronics.png',
+      categoryName: p.categoryName,
+      categorySlug: p.categorySlug,
+    }));
+
+    return res.json({
+      success: true,
+      query: rawQuery,
+      totalMatches,
+      categories: categoryResult.rows,
+      products,
+    });
+  } catch (err) {
+    console.error('Store Search Controller Error:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to perform store search.',
+    });
+  }
+};
+

@@ -4,6 +4,7 @@ import {
   getStoreProductById,
   getStoreCategories,
   getStoreKits,
+  searchStoreProducts,
 } from '../../controllers/user/userProductController.js';
 import {
   getProductReviews,
@@ -16,6 +17,8 @@ import {getUserBrandLogos} from '../../controllers/admin/brandRibbonController.j
 
 const router = express.Router();
 
+router.get('/search', searchStoreProducts);
+router.get('/products/search', searchStoreProducts);
 router.get('/products', getStoreProducts);
 router.get('/products/:id', getStoreProductById);
 router.get('/products/:id/reviews', getProductReviews);

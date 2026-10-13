@@ -230,8 +230,10 @@ export async function initDb() {
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS subtotal NUMERIC(10, 2) DEFAULT 0.00;');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_fee NUMERIC(10, 2) DEFAULT 0.00;');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax NUMERIC(10, 2) DEFAULT 0.00;');
-    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT \'Credit Card\';');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;');
     await db.query('CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);');
 
     // 10. order_items
@@ -250,6 +252,38 @@ export async function initDb() {
       );
     `);
     await db.query('CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);');
+
+    // 10b. payments
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        provider VARCHAR(30) NOT NULL DEFAULT 'razorpay',
+        provider_order_id VARCHAR(100) UNIQUE,
+        provider_payment_id VARCHAR(100) UNIQUE,
+        amount BIGINT NOT NULL CHECK (amount > 0),
+        currency CHAR(3) NOT NULL DEFAULT 'INR',
+        status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+            CHECK (status IN (
+                'PENDING',
+                'AUTHORIZED',
+                'SUCCESS',
+                'FAILED',
+                'REFUND_PENDING',
+                'PARTIALLY_REFUNDED',
+                'REFUNDED'
+            )),
+        payment_method VARCHAR(50),
+        failure_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT payments_order_provider_unique
+            UNIQUE (order_id, provider, provider_order_id)
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at DESC);');
 
     // 11. user_logs
     await db.query(`

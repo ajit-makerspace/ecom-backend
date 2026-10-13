@@ -21,6 +21,11 @@ export const getOrders = async (req, res) => {
         o.status,
         o.payment_status AS "paymentStatus",
         o.payment_method AS "paymentMethod",
+        o.razorpay_order_id AS "razorpayOrderId",
+        o.razorpay_payment_id AS "razorpayPaymentId",
+        p.id AS "paymentId",
+        p.provider_payment_id AS "paymentProviderPaymentId",
+        p.status AS "paymentRecordStatus",
         o.created_at AS "createdAt",
         COALESCE(
           json_agg(
@@ -39,7 +44,10 @@ export const getOrders = async (req, res) => {
         ) AS items
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      GROUP BY o.id
+      LEFT JOIN LATERAL (
+        SELECT id, provider_payment_id, status FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
+      ) p ON true
+      GROUP BY o.id, p.id, p.provider_payment_id, p.status
       ORDER BY o.id DESC
     `);
 
