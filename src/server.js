@@ -27,6 +27,7 @@ import userCartRoutes from './routes/user/userCartRoutes.js';
 import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
 import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
 import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
+import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 
@@ -171,6 +172,7 @@ app.use('/api/user', userCartRoutes);
 app.use('/api/user', userWishlistRoutes);
 app.use('/api/user', userEnquiryRoutes);
 app.use('/api/user', userChatbotRoutes);
+app.use('/api/user', userPaymentRoutes);
 
 
 // Centralized Error Handler
