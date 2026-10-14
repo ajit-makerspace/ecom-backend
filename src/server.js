@@ -28,6 +28,7 @@ import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
 import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
 import userModuleRoutes from "./routes/user/userModuleRoutes.js";
 import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
+import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 
@@ -94,10 +95,14 @@ app.get('/api/media/:id', async (req, res) => {
   }
 });
 
-// Database Upload Resolver: streams any /uploads/:folder/:filename directly from PostgreSQL product_images & media_files
-app.get(['/uploads/:folder/:filename', '/uploads/:filename'], async (req, res, next) => {
+// Serve static uploads directly from backend uploads folder (including nested products/robu, brands, banners, etc.)
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// Database Upload Resolver: streams any /uploads/* from PostgreSQL product_images & media_files if not found on disk
+app.get('/uploads/*', async (req, res, next) => {
   try {
-    const filename = req.params.filename || req.params.folder;
+    const rawPath = req.params[0] || '';
+    const filename = path.basename(rawPath);
     if (!filename) return next();
 
     // 1. Check PostgreSQL product_images table first
@@ -124,13 +129,7 @@ app.get(['/uploads/:folder/:filename', '/uploads/:filename'], async (req, res, n
       return res.end(rows[0].data);
     }
 
-    // 3. Fallback to physical disk if any legacy file exists
-    const candidate = path.join(UPLOADS_DIR, req.params.folder || '', filename);
-    if (fs.existsSync(candidate)) {
-      return res.sendFile(candidate);
-    }
-
-    return res.status(404).send('Image not found in database');
+    return res.status(404).send('Image not found in backend or database');
   } catch (err) {
     console.error('Database Upload Stream Error:', err);
     next(err);
@@ -175,6 +174,7 @@ app.use('/api/user', userWishlistRoutes);
 app.use('/api/user', userEnquiryRoutes);
 app.use('/api/user', userChatbotRoutes);
 app.use('/api/user', userModuleRoutes);
+app.use('/api/user', userPaymentRoutes);
 
 
 // Centralized Error Handler
