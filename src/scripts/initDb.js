@@ -72,6 +72,27 @@ export async function initDb() {
       );
     `);
 
+    // 4a. user_gst_numbers
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_gst_numbers (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        gstin VARCHAR(15) NOT NULL,
+        legal_business_name VARCHAR(255) NOT NULL,
+        trade_name VARCHAR(255),
+        billing_address_id INTEGER REFERENCES user_addresses(id) ON DELETE SET NULL,
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        status SMALLINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_user_gst_number UNIQUE (user_id, gstin),
+        CONSTRAINT chk_user_gstin_format CHECK (
+          gstin ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$'
+        )
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_gst_numbers_user_id ON user_gst_numbers(user_id);');
+
     // 4b. email_otps (For Passwordless / Email Verification Codes)
     await db.query(`
       CREATE TABLE IF NOT EXISTS email_otps (
@@ -174,6 +195,8 @@ export async function initDb() {
     await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS is_kit BOOLEAN NOT NULL DEFAULT FALSE;');
     await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS specifications JSONB DEFAULT \'{}\';');
     await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS kit_discount_percentage NUMERIC(5, 2) DEFAULT 0.00;');
+    await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(8);');
+    await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5, 2);');
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);');
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_is_kit ON products(is_kit);');
 
@@ -234,6 +257,14 @@ export async function initDb() {
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255);');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS requires_gst_invoice BOOLEAN NOT NULL DEFAULT FALSE;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_gstin VARCHAR(15);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_business_name VARCHAR(255);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_address JSONB;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS place_of_supply_state_code VARCHAR(2);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(50);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMPTZ;');
+    await db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_invoice_number ON orders(invoice_number) WHERE invoice_number IS NOT NULL;');
     await db.query('CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);');
 
     // 10. order_items

@@ -132,12 +132,20 @@ export const placeOrder = async (req, res) => {
         razorpay_order_id,
         razorpay_payment_id,
         razorpay_signature,
+        requires_gst_invoice,
+        customer_gstin,
+        billing_business_name,
+        billing_address,
+        place_of_supply_state_code,
+        invoice_number,
+        invoice_date,
         created_at,
         updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18, $19, $20, $21, NOW(), NOW()
-      ) RETURNING id, order_number, total_amount, status, payment_status, created_at;
+        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+        $27, $28, NOW(), NOW()
+      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, created_at;
     `;
 
     const finalStatus = req.body.status || 'Pending';
@@ -145,6 +153,15 @@ export const placeOrder = async (req, res) => {
     const rzpOrderId = req.body.razorpay_order_id || req.body.razorpayOrderId || null;
     const rzpPaymentId = req.body.razorpay_payment_id || req.body.razorpayPaymentId || null;
     const rzpSignature = req.body.razorpay_signature || req.body.razorpaySignature || null;
+
+    const requiresGstInvoice = Boolean(req.body.requires_gst_invoice || req.body.requiresGstInvoice);
+    const customerGstin = requiresGstInvoice && req.body.customer_gstin ? String(req.body.customer_gstin).trim().toUpperCase() : null;
+    const billingBusinessName = requiresGstInvoice && req.body.billing_business_name ? String(req.body.billing_business_name).trim() : null;
+    const tradeName = requiresGstInvoice && req.body.trade_name ? String(req.body.trade_name).trim() : null;
+    const billingAddress = requiresGstInvoice && req.body.billing_address ? req.body.billing_address : null;
+    const placeOfSupply = customerGstin && customerGstin.length >= 2 ? customerGstin.slice(0, 2) : (req.body.place_of_supply_state_code || null);
+    const invoiceNumber = requiresGstInvoice ? `INV-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}` : null;
+    const invoiceDate = requiresGstInvoice ? new Date() : null;
 
     const orderValues = [
       orderNumber,
@@ -168,10 +185,59 @@ export const placeOrder = async (req, res) => {
       rzpOrderId,
       rzpPaymentId,
       rzpSignature,
+      requiresGstInvoice,
+      customerGstin,
+      billingBusinessName,
+      billingAddress ? JSON.stringify(billingAddress) : null,
+      placeOfSupply,
+      invoiceNumber,
+      invoiceDate,
     ];
 
     const orderResult = await client.query(orderInsertSql, orderValues);
     const createdOrder = orderResult.rows[0];
+
+    // If customer provided GST profile and is logged in, upsert into user_gst_numbers
+    if (userId && customerGstin && billingBusinessName) {
+      try {
+        const countRes = await client.query(
+          `SELECT COUNT(*) FROM user_gst_numbers WHERE user_id = $1 AND status = 1`,
+          [userId]
+        );
+        const shouldBeDefault = parseInt(countRes.rows[0].count, 10) === 0;
+
+        await client.query(
+          `INSERT INTO user_gst_numbers (
+            user_id,
+            gstin,
+            legal_business_name,
+            trade_name,
+            billing_address_id,
+            is_default,
+            status,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, 1, NOW(), NOW())
+          ON CONFLICT (user_id, gstin)
+          DO UPDATE SET
+            legal_business_name = EXCLUDED.legal_business_name,
+            trade_name = COALESCE(EXCLUDED.trade_name, user_gst_numbers.trade_name),
+            billing_address_id = COALESCE(EXCLUDED.billing_address_id, user_gst_numbers.billing_address_id),
+            status = 1,
+            updated_at = NOW()`,
+          [
+            userId,
+            customerGstin,
+            billingBusinessName,
+            tradeName,
+            req.body.billing_address_id || null,
+            shouldBeDefault,
+          ]
+        );
+      } catch (gstErr) {
+        console.warn('Could not upsert user_gst_numbers:', gstErr.message);
+      }
+    }
 
     // 3. Insert order items
     for (const item of validatedItems) {
