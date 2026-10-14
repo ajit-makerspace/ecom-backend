@@ -26,6 +26,7 @@ import userProfileRoutes from './routes/user/userProfileRoutes.js';
 import userCartRoutes from './routes/user/userCartRoutes.js';
 import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
 import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
+import userModuleRoutes from "./routes/user/userModuleRoutes.js";
 import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
@@ -172,6 +173,7 @@ app.use('/api/user', userCartRoutes);
 app.use('/api/user', userWishlistRoutes);
 app.use('/api/user', userEnquiryRoutes);
 app.use('/api/user', userChatbotRoutes);
+app.use('/api/user', userModuleRoutes);
 app.use('/api/user', userPaymentRoutes);
 
 
