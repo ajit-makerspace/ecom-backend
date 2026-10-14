@@ -15,30 +15,29 @@ const resolveBrandId = async (
   queryable,
   { brandId, newBrandName, newBrandLogoUrl }
 ) => {
-  if (
-    brandId !== undefined &&
-    brandId !== null &&
-    String(brandId).trim() !== ''
-  ) {
-    const parsedBrandId = parseInt(brandId, 10);
+ if (brandId !== undefined && brandId !== null && brandId !== '') {
+  const parsedBrandId = parseInt(brandId, 10);
 
-    if (!Number.isInteger(parsedBrandId) || parsedBrandId <= 0) {
-      throw new Error('brandId must be a valid brand ID.');
-    }
-
-    const existing = await queryable.query(
-      'SELECT id FROM public.brand_logos WHERE id = $1',
-      [parsedBrandId]
-    );
-
-    if (existing.rows.length === 0) {
-      throw new Error(
-        `Brand ID ${parsedBrandId} does not exist in brand_logos.`
-      );
-    }
-
-    return parsedBrandId;
+  if (!Number.isInteger(parsedBrandId) || parsedBrandId <= 0) {
+    throw new Error(`Invalid brand ID: ${brandId}`);
   }
+
+  const { rows } = await queryable.query(
+    `SELECT id
+     FROM brand_logos
+     WHERE id = $1
+       AND status != 2`,
+    [parsedBrandId]
+  );
+
+  if (rows.length === 0) {
+    throw new Error(
+      `Brand ID ${parsedBrandId} does not exist or has been deleted.`
+    );
+  }
+
+  return parsedBrandId;
+}
 
   const cleanBrandName = String(newBrandName || '').trim();
 
@@ -105,7 +104,9 @@ export const getProducts = async (req, res) => {
         p.slug,
         p.sku,
         p.description,
-        p.brand_id AS "brandId",
+       p.brand_id AS "brandId",
+bl.name AS brand,
+bl.logo_url AS "brandLogoUrl",
         p.price,
         p.old_price AS "oldPrice",
         p.weight,
@@ -156,6 +157,9 @@ export const getProducts = async (req, res) => {
       LEFT JOIN subcategories sc
         ON p.sub_category_id = sc.id
         AND sc.status != 2
+        LEFT JOIN brand_logos bl
+  ON p.brand_id = bl.id
+  AND bl.status != 2
 
       WHERE p.status != 2
       ORDER BY p.id DESC
@@ -821,6 +825,7 @@ export const deleteProduct = async (req, res) => {
 };
 
 // 5. Bulk Import Products
+
 export const bulkImportProducts = async (req, res) => {
   const client = await db.pool.connect();
 
@@ -845,6 +850,8 @@ export const bulkImportProducts = async (req, res) => {
         item.name || item['Product Name'] || ''
       ).trim();
 
+      if (!name) continue;
+
       const catId = item.categoryId
         ? parseInt(item.categoryId, 10)
         : 1;
@@ -854,20 +861,26 @@ export const bulkImportProducts = async (req, res) => {
         : null;
 
       const price =
-        parseFloat(item.price || item['Price']) || 0.0;
+        parseFloat(item.price ?? item['Price']) || 0;
 
-      const oldPrice = item.oldPrice
-        ? parseFloat(item.oldPrice)
-        : null;
+      const oldPrice =
+        item.oldPrice || item['Old Price']
+          ? parseFloat(item.oldPrice ?? item['Old Price'])
+          : null;
 
       const weight = item.weight
         ? parseFloat(item.weight)
         : null;
 
-      const brandId = await resolveBrandId(client, {
+      // Resolve the brand to brand_logos.id.
+      // A CSV brand name is reused or created by resolveBrandId.
+      const resolvedBrandId = await resolveBrandId(client, {
         brandId: item.brandId ?? item.brand_id,
         newBrandName:
-          item.newBrandName || item.newBrand?.name,
+          item.newBrandName ||
+          item.newBrand?.name ||
+          item.brand ||
+          item.Brand,
         newBrandLogoUrl:
           item.newBrandLogoUrl ||
           item.newBrand?.logoUrl ||
@@ -879,22 +892,21 @@ export const bulkImportProducts = async (req, res) => {
         : `SKU-IMP-${Date.now().toString().slice(-4)}-${i}`;
 
       const description = String(
-        item.description || ''
+        item.description || item.Description || ''
       ).trim();
 
       const image = String(
-        item.image || item.image_url || ''
+        item.image ||
+        item.image_url ||
+        item['Image URL'] ||
+        ''
       ).trim();
 
       const statusInt =
-        String(item.status || 'Active').toLowerCase() ===
-        'active'
+        String(item.status || item.Status || 'Active')
+          .toLowerCase() === 'active'
           ? 1
           : 2;
-
-      if (!name) {
-        continue;
-      }
 
       const slug =
         `${slugify(name)}-${Date.now().toString().slice(-4)}-${i}`;
@@ -924,7 +936,10 @@ export const bulkImportProducts = async (req, res) => {
           slug,
           sku,
           category_id AS "categoryId",
+          sub_category_id AS "subCategoryId",
           price,
+          old_price AS "oldPrice",
+          weight,
           brand_id AS "brandId",
           image_url AS "image",
           status`,
@@ -935,7 +950,7 @@ export const bulkImportProducts = async (req, res) => {
           slug,
           sku,
           description,
-          brandId,
+          resolvedBrandId,
           price,
           oldPrice,
           weight,
@@ -947,6 +962,12 @@ export const bulkImportProducts = async (req, res) => {
       const prod = resInsert.rows[0];
 
       prod.price = parseFloat(prod.price || 0);
+      prod.oldPrice = prod.oldPrice
+        ? parseFloat(prod.oldPrice)
+        : null;
+      prod.weight = prod.weight
+        ? parseFloat(prod.weight)
+        : null;
 
       prod.status =
         prod.status === 1 ? 'Active' : 'Inactive';
