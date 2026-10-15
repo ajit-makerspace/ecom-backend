@@ -1,18 +1,20 @@
 import db from '../../config/db.js';
 
-// Auto-migrate Razorpay columns on orders table
-async function ensureOrderRazorpayColumns() {
+// Auto-migrate Razorpay & Delivery Date columns on orders table
+async function ensureOrderColumns() {
   try {
     await db.query(`
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date TIMESTAMPTZ;
+      UPDATE orders SET delivery_date = updated_at WHERE LOWER(status) = 'delivered' AND delivery_date IS NULL;
     `);
   } catch (err) {
-    console.error('Error ensuring Razorpay columns on orders table:', err.message);
+    console.error('Error ensuring columns on orders table:', err.message);
   }
 }
-ensureOrderRazorpayColumns();
+ensureOrderColumns();
 
 // Customer Place Order Controller (Transactional SQL)
 export const placeOrder = async (req, res) => {
@@ -139,13 +141,14 @@ export const placeOrder = async (req, res) => {
         place_of_supply_state_code,
         invoice_number,
         invoice_date,
+        delivery_date,
         created_at,
         updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
         $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-        $27, $28, NOW(), NOW()
-      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, created_at;
+        $27, $28, $29, NOW(), NOW()
+      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, delivery_date, created_at;
     `;
 
     const finalStatus = req.body.status || 'Pending';
@@ -162,6 +165,7 @@ export const placeOrder = async (req, res) => {
     const placeOfSupply = customerGstin && customerGstin.length >= 2 ? customerGstin.slice(0, 2) : (req.body.place_of_supply_state_code || null);
     const invoiceNumber = requiresGstInvoice ? `INV-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}` : null;
     const invoiceDate = requiresGstInvoice ? new Date() : null;
+    const deliveryDate = String(finalStatus).trim().toLowerCase() === 'delivered' ? new Date() : (req.body.delivery_date ? new Date(req.body.delivery_date) : null);
 
     const orderValues = [
       orderNumber,
@@ -192,6 +196,7 @@ export const placeOrder = async (req, res) => {
       placeOfSupply,
       invoiceNumber,
       invoiceDate,
+      deliveryDate,
     ];
 
     const orderResult = await client.query(orderInsertSql, orderValues);
@@ -356,10 +361,18 @@ export const getUserOrders = async (req, res) => {
         o.payment_method AS "paymentMethod",
         o.razorpay_order_id AS "razorpayOrderId",
         o.razorpay_payment_id AS "razorpayPaymentId",
+        o.requires_gst_invoice AS "requiresGstInvoice",
+        o.customer_gstin AS "customerGstin",
+        o.billing_business_name AS "billingBusinessName",
+        o.billing_address AS "billingAddress",
+        o.invoice_number AS "invoiceNumber",
+        o.invoice_date AS "invoiceDate",
+        o.delivery_date AS "deliveryDate",
         p.id AS "paymentId",
         p.provider_payment_id AS "paymentProviderPaymentId",
         p.status AS "paymentRecordStatus",
         o.created_at AS "createdAt",
+        o.updated_at AS "updatedAt",
         COALESCE(
           json_agg(
             json_build_object(
@@ -385,10 +398,15 @@ export const getUserOrders = async (req, res) => {
     const params = [];
     if (userId) {
       params.push(userId);
-      queryText += ` WHERE o.user_id = $1`;
+      if (req.user?.email) {
+        params.push(String(req.user.email).trim().toLowerCase());
+        queryText += ` WHERE (o.user_id = $1 OR LOWER(o.customer_email) = $2)`;
+      } else {
+        queryText += ` WHERE o.user_id = $1`;
+      }
     }
 
-    queryText += ` GROUP BY o.id, p.id, p.provider_payment_id, p.status ORDER BY o.id DESC LIMIT 10`;
+    queryText += ` GROUP BY o.id, p.id, p.provider_payment_id, p.status ORDER BY o.id DESC LIMIT 50`;
 
     let { rows } = await db.query(queryText, params);
 
@@ -415,10 +433,18 @@ export const getUserOrders = async (req, res) => {
           o.payment_method AS "paymentMethod",
           o.razorpay_order_id AS "razorpayOrderId",
           o.razorpay_payment_id AS "razorpayPaymentId",
+          o.requires_gst_invoice AS "requiresGstInvoice",
+          o.customer_gstin AS "customerGstin",
+          o.billing_business_name AS "billingBusinessName",
+          o.billing_address AS "billingAddress",
+          o.invoice_number AS "invoiceNumber",
+          o.invoice_date AS "invoiceDate",
+          o.delivery_date AS "deliveryDate",
           p.id AS "paymentId",
           p.provider_payment_id AS "paymentProviderPaymentId",
           p.status AS "paymentRecordStatus",
           o.created_at AS "createdAt",
+          o.updated_at AS "updatedAt",
           COALESCE(
             json_agg(
               json_build_object(
@@ -441,7 +467,7 @@ export const getUserOrders = async (req, res) => {
         ) p ON true
         GROUP BY o.id, p.id, p.provider_payment_id, p.status
         ORDER BY o.id DESC
-        LIMIT 10
+        LIMIT 50
       `);
       rows = fallback.rows;
     }
@@ -491,10 +517,18 @@ export const getUserOrderById = async (req, res) => {
         o.payment_method AS "paymentMethod",
         o.razorpay_order_id AS "razorpayOrderId",
         o.razorpay_payment_id AS "razorpayPaymentId",
+        o.requires_gst_invoice AS "requiresGstInvoice",
+        o.customer_gstin AS "customerGstin",
+        o.billing_business_name AS "billingBusinessName",
+        o.billing_address AS "billingAddress",
+        o.invoice_number AS "invoiceNumber",
+        o.invoice_date AS "invoiceDate",
+        o.delivery_date AS "deliveryDate",
         p.id AS "paymentId",
         p.provider_payment_id AS "paymentProviderPaymentId",
         p.status AS "paymentRecordStatus",
         o.created_at AS "createdAt",
+        o.updated_at AS "updatedAt",
         COALESCE(
           json_agg(
             json_build_object(
@@ -515,9 +549,9 @@ export const getUserOrderById = async (req, res) => {
       LEFT JOIN LATERAL (
         SELECT id, provider_payment_id, status FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
       ) p ON true
-      WHERE (o.id::text = $1 OR o.order_number = $1) AND ($2::int IS NULL OR o.user_id = $2)
+      WHERE (o.id::text = $1 OR o.order_number = $1) AND ($2::text IS NULL OR o.user_id::text = $2)
       GROUP BY o.id, p.id, p.provider_payment_id, p.status`,
-      [id, userId]
+      [id, userId ? String(userId) : null]
     );
 
     if (rows.length === 0) {

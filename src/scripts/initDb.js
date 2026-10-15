@@ -264,6 +264,8 @@ export async function initDb() {
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS place_of_supply_state_code VARCHAR(2);');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(50);');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMPTZ;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date TIMESTAMPTZ;');
+    await db.query("UPDATE orders SET delivery_date = updated_at WHERE LOWER(status) = 'delivered' AND delivery_date IS NULL;");
     await db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_invoice_number ON orders(invoice_number) WHERE invoice_number IS NOT NULL;');
     await db.query('CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);');
 
