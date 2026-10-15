@@ -19,7 +19,7 @@ router.use(requireAdmin);
 
 
 router.get('/brand-logos', getBrandLogos);
-router.get('/:id', getBrandLogoById);
+// router.get('/:id', getBrandLogoById);
 
 router.post('/brand-logos', createBrandLogo);
 router.put('/brand-logos/:id', updateBrandLogo);
