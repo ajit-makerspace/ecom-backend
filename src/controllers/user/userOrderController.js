@@ -549,9 +549,9 @@ export const getUserOrderById = async (req, res) => {
       LEFT JOIN LATERAL (
         SELECT id, provider_payment_id, status FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
       ) p ON true
-      WHERE (o.id::text = $1 OR o.order_number = $1) AND ($2::text IS NULL OR o.user_id::text = $2)
+      WHERE (o.id::text = $1::text OR o.order_number::text = $1::text) AND ($2::text IS NULL OR o.user_id::text = $2::text)
       GROUP BY o.id, p.id, p.provider_payment_id, p.status`,
-      [id, userId ? String(userId) : null]
+      [String(id), userId ? String(userId) : null]
     );
 
     if (rows.length === 0) {
