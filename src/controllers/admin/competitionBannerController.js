@@ -561,24 +561,24 @@ export const getActiveCompetitionBanner = async (req, res) => {
 
 // Convert PostgreSQL column names to the camelCase fields
 // already used by your React Competitions admin page.
+
+// -------------------------------------------------------
+// COMPETITION CRUD
+// -------------------------------------------------------
+
 const formatCompetition = (row) => ({
   id: String(row.id),
   title: row.title,
-  status: row.status,
-  category: row.category,
-  description: row.description,
-  longDescription: row.long_description,
-  eligibility: row.eligibility,
-  gradeLevel: row.grade_level,
-  image: row.image_url,
-  imageAlt: row.image_alt,
-  duration: row.duration,
-  teamSize: row.team_size,
-  registrationDeadline: row.registration_deadline,
-  eventDate: row.event_date,
-  prize: row.prize,
-  location: row.location,
-  rules: row.rules || [],
+  competitionDate: row.competition_date,
+  registrationStartDate: row.registration_start_date,
+  topic: row.topic,
+  advisorOrganizer: row.advisor_organizer,
+  competitionUrl: row.competition_url,
+  overview: row.overview,
+  objective: row.objective,
+  participants: row.participants,
+  imageUrl: row.image_url,
+  isActive: row.is_active,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -586,79 +586,156 @@ const formatCompetition = (row) => ({
 const competitionColumns = `
   id,
   title,
-  status,
-  category,
-  description,
-  long_description,
-  eligibility,
-  grade_level,
+  competition_date,
+  registration_start_date,
+  topic,
+  advisor_organizer,
+  competition_url,
+  overview,
+  objective,
+  participants,
   image_url,
-  image_alt,
-  duration,
-  team_size,
-  registration_deadline,
-  event_date,
-  prize,
-  location,
-  rules,
+  is_active,
   created_at,
   updated_at
 `;
 
-const allowedStatuses = [
-  "Registrations Open",
-  "Upcoming",
-  "Closed",
-];
+// -------------------------------------------------------
+// VALIDATION AND NORMALIZATION HELPERS
+// -------------------------------------------------------
 
-const allowedCategories = [
-  "Robotics",
-  "Coding",
-  "Engineering",
-  "Design",
-];
+const isValidDate = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return true;
+  }
 
-const allowedGrades = [
-  "Grades 6–8",
-  "Grades 9–12",
-  "University",
-];
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value
+  );
+};
+
+const normalizeDate = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  return value;
+};
+
+const normalizeText = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  return typeof value === 'string' ? value.trim() : null;
+};
+
+const normalizeActive = (value, defaultValue = true) => {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  if (
+    value === true ||
+    value === 1 ||
+    value === 'true' ||
+    value === '1'
+  ) {
+    return true;
+  }
+
+  if (
+    value === false ||
+    value === 0 ||
+    value === 'false' ||
+    value === '0'
+  ) {
+    return false;
+  }
+
+  return null;
+};
 
 const validateCompetition = (body) => {
   const errors = [];
 
-  if (!body.title?.trim()) {
-    errors.push("Title is required.");
-  }
-
-  if (!body.description?.trim()) {
-    errors.push("Short description is required.");
-  }
-
-  if (!allowedStatuses.includes(body.status)) {
-    errors.push("Invalid competition status.");
-  }
-
-  if (!allowedCategories.includes(body.category)) {
-    errors.push("Invalid competition category.");
-  }
-
-  if (!allowedGrades.includes(body.gradeLevel)) {
-    errors.push("Invalid grade level.");
+  if (typeof body.title !== 'string' || !body.title.trim()) {
+    errors.push('Competition title is required.');
+  } else if (body.title.trim().length > 255) {
+    errors.push('Competition title cannot exceed 255 characters.');
   }
 
   if (
-    body.rules !== undefined &&
-    (!Array.isArray(body.rules) ||
-      !body.rules.every((rule) => typeof rule === "string"))
+    body.topic !== undefined &&
+    body.topic !== null &&
+    (typeof body.topic !== 'string' || body.topic.length > 255)
   ) {
-    errors.push("Rules must be an array of strings.");
+    errors.push('Topic must be text with a maximum of 255 characters.');
+  }
+
+  if (
+    body.advisorOrganizer !== undefined &&
+    body.advisorOrganizer !== null &&
+    (
+      typeof body.advisorOrganizer !== 'string' ||
+      body.advisorOrganizer.length > 255
+    )
+  ) {
+    errors.push(
+      'Advisor/Organizer must be text with a maximum of 255 characters.'
+    );
+  }
+
+  if (
+    !isValidDate(body.competitionDate) ||
+    !isValidDate(body.registrationStartDate)
+  ) {
+    errors.push('Please provide valid dates in YYYY-MM-DD format.');
+  }
+
+  const activeValue =
+    body.isActive !== undefined ? body.isActive : body.is_active;
+
+  if (
+    activeValue !== undefined &&
+    normalizeActive(activeValue, true) === null
+  ) {
+    errors.push('Active status must be true or false.');
+  }
+
+  const textFields = [
+    'competitionUrl',
+    'overview',
+    'objective',
+    'participants',
+    'imageUrl',
+    'image',
+  ];
+
+  for (const field of textFields) {
+    if (
+      body[field] !== undefined &&
+      body[field] !== null &&
+      typeof body[field] !== 'string'
+    ) {
+      errors.push(`${field} must be text.`);
+    }
   }
 
   return errors;
 };
 
+// -------------------------------------------------------
 // GET /api/admin/competitions
+// -------------------------------------------------------
+
 export const getCompetitions = async (req, res, next) => {
   try {
     const result = await db.query(`
@@ -676,7 +753,10 @@ export const getCompetitions = async (req, res, next) => {
   }
 };
 
+// -------------------------------------------------------
 // GET /api/admin/competitions/:id
+// -------------------------------------------------------
+
 export const getCompetitionById = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -684,7 +764,7 @@ export const getCompetitionById = async (req, res, next) => {
     if (!/^\d+$/.test(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid competition ID.",
+        message: 'Invalid competition ID.',
       });
     }
 
@@ -698,7 +778,7 @@ export const getCompetitionById = async (req, res, next) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "Competition not found.",
+        message: 'Competition not found.',
       });
     }
 
@@ -711,73 +791,74 @@ export const getCompetitionById = async (req, res, next) => {
   }
 };
 
+// -------------------------------------------------------
 // POST /api/admin/competitions
+// -------------------------------------------------------
+
 export const createCompetition = async (req, res, next) => {
   try {
-    const errors = validateCompetition(req.body);
+    const body = req.body || {};
+    const errors = validateCompetition(body);
 
-    if (errors.length) {
+    if (errors.length > 0) {
       return res.status(400).json({
         success: false,
-        message: errors.join(" "),
+        message: errors.join(' '),
       });
     }
 
-    const body = req.body;
+    const isActive = normalizeActive(
+      body.isActive !== undefined ? body.isActive : body.is_active,
+      true
+    );
 
-    const rules = (body.rules || [])
-      .filter((rule) => rule.trim() !== "");
+    const imageValue =
+      body.imageUrl !== undefined ? body.imageUrl : body.image;
 
     const values = [
       body.title.trim(),
-      body.status,
-      body.category,
-      body.description.trim(),
-      body.longDescription || "",
-      body.eligibility || "",
-      body.gradeLevel,
-      body.image || "",
-      body.imageAlt || "",
-      body.duration || "",
-      body.teamSize || "",
-      body.registrationDeadline || "",
-      body.eventDate || "",
-      body.prize || "",
-      body.location || "",
-      JSON.stringify(rules),
+      normalizeDate(body.competitionDate),
+      normalizeDate(body.registrationStartDate),
+      normalizeText(body.topic),
+      normalizeText(body.advisorOrganizer),
+      normalizeText(body.competitionUrl),
+      normalizeText(body.overview),
+      normalizeText(body.objective),
+      normalizeText(body.participants),
+      normalizeText(imageValue),
+      isActive,
     ];
+
+    if (values.some((value) => value === null)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Please provide valid text values for the competition fields.',
+      });
+    }
 
     const result = await db.query(
       `INSERT INTO competitions (
         title,
-        status,
-        category,
-        description,
-        long_description,
-        eligibility,
-        grade_level,
+        competition_date,
+        registration_start_date,
+        topic,
+        advisor_organizer,
+        competition_url,
+        overview,
+        objective,
+        participants,
         image_url,
-        image_alt,
-        duration,
-        team_size,
-        registration_deadline,
-        event_date,
-        prize,
-        location,
-        rules
+        is_active
       )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11, $12, $13, $14, $15,
-        $16::jsonb
-      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING ${competitionColumns}`,
       values
     );
 
     return res.status(201).json({
       success: true,
-      message: "Competition created successfully.",
+      message: 'Competition created successfully.',
       data: formatCompetition(result.rows[0]),
     });
   } catch (error) {
@@ -785,7 +866,10 @@ export const createCompetition = async (req, res, next) => {
   }
 };
 
+// -------------------------------------------------------
 // PUT /api/admin/competitions/:id
+// -------------------------------------------------------
+
 export const updateCompetition = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -793,79 +877,155 @@ export const updateCompetition = async (req, res, next) => {
     if (!/^\d+$/.test(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid competition ID.",
+        message: 'Invalid competition ID.',
       });
     }
 
-    const errors = validateCompetition(req.body);
+    const body = req.body || {};
+    const errors = validateCompetition(body);
 
-    if (errors.length) {
+    if (errors.length > 0) {
       return res.status(400).json({
         success: false,
-        message: errors.join(" "),
+        message: errors.join(' '),
       });
     }
 
-    const body = req.body;
+    // Fetch the existing record so omitted fields can be preserved.
+    const existingResult = await db.query(
+      `SELECT ${competitionColumns}
+       FROM competitions
+       WHERE id = $1`,
+      [id]
+    );
 
-    const rules = (body.rules || [])
-      .filter((rule) => rule.trim() !== "");
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Competition not found.',
+      });
+    }
+
+    const existing = existingResult.rows[0];
+
+    const pick = (camelValue, snakeValue, existingValue) => {
+      if (body[camelValue] !== undefined) {
+        return body[camelValue];
+      }
+
+      if (snakeValue && body[snakeValue] !== undefined) {
+        return body[snakeValue];
+      }
+
+      return existingValue;
+    };
+
+    const title = body.title !== undefined
+      ? body.title.trim()
+      : existing.title;
+
+    const competitionDate = normalizeDate(
+      pick('competitionDate', 'competition_date', existing.competition_date)
+    );
+
+    const registrationStartDate = normalizeDate(
+      pick(
+        'registrationStartDate',
+        'registration_start_date',
+        existing.registration_start_date
+      )
+    );
+
+    const topic = normalizeText(
+      pick('topic', null, existing.topic)
+    );
+
+    const advisorOrganizer = normalizeText(
+      pick('advisorOrganizer', 'advisor_organizer', existing.advisor_organizer)
+    );
+
+    const competitionUrl = normalizeText(
+      pick('competitionUrl', 'competition_url', existing.competition_url)
+    );
+
+    const overview = normalizeText(
+      pick('overview', null, existing.overview)
+    );
+
+    const objective = normalizeText(
+      pick('objective', null, existing.objective)
+    );
+
+    const participants = normalizeText(
+      pick('participants', null, existing.participants)
+    );
+
+    // Preserve the existing image when the request doesn't include one.
+    // An explicitly supplied empty string clears the image URL.
+    const imageInput =
+      body.imageUrl !== undefined
+        ? body.imageUrl
+        : body.image !== undefined
+          ? body.image
+          : existing.image_url;
+
+    const imageUrl = normalizeText(imageInput);
+
+    const activeInput =
+      body.isActive !== undefined
+        ? body.isActive
+        : body.is_active !== undefined
+          ? body.is_active
+          : existing.is_active;
+
+    const isActive = normalizeActive(activeInput, existing.is_active);
 
     const values = [
       id,
-      body.title.trim(),
-      body.status,
-      body.category,
-      body.description.trim(),
-      body.longDescription || "",
-      body.eligibility || "",
-      body.gradeLevel,
-      body.image || "",
-      body.imageAlt || "",
-      body.duration || "",
-      body.teamSize || "",
-      body.registrationDeadline || "",
-      body.eventDate || "",
-      body.prize || "",
-      body.location || "",
-      JSON.stringify(rules),
+      title,
+      competitionDate,
+      registrationStartDate,
+      topic,
+      advisorOrganizer,
+      competitionUrl,
+      overview,
+      objective,
+      participants,
+      imageUrl,
+      isActive,
     ];
+
+    if (values.some((value) => value === null)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Please provide valid text values for the competition fields.',
+      });
+    }
 
     const result = await db.query(
       `UPDATE competitions
        SET
          title = $2,
-         status = $3,
-         category = $4,
-         description = $5,
-         long_description = $6,
-         eligibility = $7,
-         grade_level = $8,
-         image_url = $9,
-         image_alt = $10,
-         duration = $11,
-         team_size = $12,
-         registration_deadline = $13,
-         event_date = $14,
-         prize = $15,
-         location = $16,
-         rules = $17::jsonb,
+         competition_date = $3,
+         registration_start_date = $4,
+         topic = $5,
+         advisor_organizer = $6,
+         competition_url = $7,
+         overview = $8,
+         objective = $9,
+         participants = $10,
+         image_url = $11,
+         is_active = $12,
          updated_at = NOW()
        WHERE id = $1
        RETURNING ${competitionColumns}`,
       values
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Competition not found.",
-      });
-    }
-
     return res.status(200).json({
       success: true,
-      message: "Competition updated successfully.",
+      message: 'Competition updated successfully.',
       data: formatCompetition(result.rows[0]),
     });
   } catch (error) {
@@ -873,7 +1033,10 @@ export const updateCompetition = async (req, res, next) => {
   }
 };
 
+// -------------------------------------------------------
 // DELETE /api/admin/competitions/:id
+// -------------------------------------------------------
+
 export const deleteCompetition = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -881,7 +1044,7 @@ export const deleteCompetition = async (req, res, next) => {
     if (!/^\d+$/.test(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid competition ID.",
+        message: 'Invalid competition ID.',
       });
     }
 
@@ -895,14 +1058,17 @@ export const deleteCompetition = async (req, res, next) => {
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "Competition not found.",
+        message: 'Competition not found.',
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Competition deleted successfully.",
-      data: result.rows[0],
+      message: 'Competition deleted successfully.',
+      data: {
+        id: String(result.rows[0].id),
+        title: result.rows[0].title,
+      },
     });
   } catch (error) {
     next(error);
