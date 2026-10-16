@@ -98,21 +98,22 @@ export const updateOrderStatus = async (req, res) => {
     let paymentStatus = 'Paid';
     if (status === 'Cancelled') paymentStatus = 'Refunded';
 
+    const isDelivered = String(status || '').trim().toLowerCase() === 'delivered';
     const providedDeliveryDate = deliveryDate || delivery_date || null;
 
     const { rows } = await db.query(
       `UPDATE orders
-       SET status = $1,
-           payment_status = $2,
+       SET status = $1::varchar,
+           payment_status = $2::varchar,
            delivery_date = CASE 
              WHEN $3::timestamptz IS NOT NULL THEN $3::timestamptz
-             WHEN LOWER($1) = 'delivered' AND (delivery_date IS NULL OR delivery_date > NOW()) THEN NOW()
+             WHEN $4::boolean = true AND (delivery_date IS NULL OR delivery_date > NOW()) THEN NOW()
              ELSE delivery_date 
            END,
            updated_at = NOW()
-       WHERE id = $4
+       WHERE id = $5
        RETURNING id, order_number AS "orderNumber", status, payment_status AS "paymentStatus", delivery_date AS "deliveryDate", updated_at AS "updatedAt"`,
-      [status, paymentStatus, providedDeliveryDate, id]
+      [status, paymentStatus, providedDeliveryDate, isDelivered, id]
     );
 
     if (rows.length === 0) {
