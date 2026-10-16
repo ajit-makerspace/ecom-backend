@@ -18,6 +18,7 @@ import kitShowcaseRoutes from "./routes/admin/kitShowcaseRoutes.js"
 import chatbotRoutes from './routes/admin/chatbotRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 import brandLogoRoutes from './routes/admin/brandLogoRoutes.js';
+import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -31,6 +32,7 @@ import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
+import userCompetitionRoute from "./routes/user/userCompetitionRoute.js"
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -161,6 +163,7 @@ app.use('/api/admin', showcaseRoutes);
 app.use('/api/admin', kitShowcaseRoutes);
 app.use('/api/admin', chatbotRoutes);
 app.use('/api/admin', brandLogoRoutes);
+app.use('/api/admin', competitionRoutes);
 
 
 
@@ -175,6 +178,7 @@ app.use('/api/user', userEnquiryRoutes);
 app.use('/api/user', userChatbotRoutes);
 app.use('/api/user', userModuleRoutes);
 app.use('/api/user', userPaymentRoutes);
+app.use('/api/user',userCompetitionRoute);
 
 
 // Centralized Error Handler

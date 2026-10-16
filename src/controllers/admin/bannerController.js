@@ -96,7 +96,7 @@ export const getBanners = async (req, res) => {
         created_at AS "createdAt",
         updated_at AS "updatedAt"
       FROM banners
-      WHERE status != 2
+      WHERE status != 2 AND banner_type=0
       ORDER BY sort_order ASC, id ASC
     `);
 
@@ -120,7 +120,7 @@ export const getPublicBanners = async (req, res) => {
     const { rows } = await db.query(`
       SELECT ${BANNER_COLUMNS}
       FROM banners
-      WHERE status = 1
+      WHERE status = 1 AND banner_type=0
         AND (starts_at IS NULL OR starts_at <= NOW())
         AND (ends_at IS NULL OR ends_at >= NOW())
       ORDER BY sort_order ASC, id ASC
