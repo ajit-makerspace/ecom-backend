@@ -1,15 +1,45 @@
 import db from '../../config/db.js';
+import { generateOrderNumber, getFiscalYearCode } from '../../utils/orderNumberGenerator.js';
+import emailService from '../../services/emailService.js';
 
-// Auto-migrate Razorpay & Delivery Date columns on orders table
+// Auto-migrate Razorpay & Delivery Date columns on orders table, and legacy order numbers
 async function ensureOrderColumns() {
   try {
     await db.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date TIMESTAMPTZ;
       UPDATE orders SET delivery_date = updated_at WHERE LOWER(status) = 'delivered' AND delivery_date IS NULL;
+      UPDATE orders o
+      SET user_id = u.id
+      FROM users u
+      WHERE o.user_id IS NULL
+        AND LOWER(o.customer_email) = LOWER(u.email);
     `);
+
+    // Auto-migrate existing orders to MSM format e.g. MSM26271001
+    const { rows: legacyOrders } = await db.query(`
+      SELECT id, order_number, created_at 
+      FROM orders 
+      ORDER BY id ASC
+    `);
+    let orderSeq = 1001;
+    for (const ord of legacyOrders) {
+      if (!ord.order_number || !ord.order_number.startsWith('MSM')) {
+        const fy = getFiscalYearCode(ord.created_at || new Date());
+        const newNum = `MSM${fy}${orderSeq}`;
+        await db.query('UPDATE orders SET order_number = $1 WHERE id = $2', [newNum, ord.id]);
+        orderSeq++;
+      } else {
+        const match = ord.order_number.match(/^MSM\d{4}(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num >= orderSeq) orderSeq = num + 1;
+        }
+      }
+    }
   } catch (err) {
     console.error('Error ensuring columns on orders table:', err.message);
   }
@@ -102,13 +132,33 @@ export const placeOrder = async (req, res) => {
     const tax = 0.00;
     const totalAmount = subtotal + shippingFee + tax;
 
-    // Generate unique order number e.g. MS-849201
-    const orderNumber = `MS-${Math.floor(100000 + Math.random() * 900000)}`;
+    // Generate unique order number e.g. MSM26271001
+    const orderNumber = await generateOrderNumber(client);
 
     const customerName = `${finalFirstName.trim()} ${(finalLastName || '').trim()}`.trim();
     const customerEmail = String(finalEmail).trim().toLowerCase();
     const customerPhone = finalPhone ? String(finalPhone).trim() : null;
-    const userId = req.user?.id || null;
+    let userId = req.user?.id || null;
+    if (!userId && customerEmail) {
+      try {
+        const userLookup = await client.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [customerEmail]);
+        if (userLookup.rows.length > 0) {
+          userId = userLookup.rows[0].id;
+        }
+      } catch (e) {
+        console.error('Error looking up user by email in placeOrder:', e);
+      }
+    }
+    if (userId && customerPhone) {
+      try {
+        await client.query(
+          `UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2 AND (phone IS NULL OR phone = '')`,
+          [customerPhone, userId]
+        );
+      } catch (e) {
+        console.error('Error updating user phone in placeOrder:', e);
+      }
+    }
 
     // 2. Insert into orders table
     const orderInsertSql = `
@@ -314,6 +364,35 @@ export const placeOrder = async (req, res) => {
 
     await client.query('COMMIT');
 
+    // Trigger Order Confirmation Email
+    if (customerEmail) {
+      emailService
+        .sendOrderConfirmationEmail({
+          email: customerEmail,
+          customerName: customerName || 'Valued Customer',
+          orderNumber: createdOrder.order_number,
+          items: validatedItems,
+          totalAmount,
+          subtotal,
+          shippingFee,
+          tax,
+          paymentMethod: finalPaymentMethod,
+          paymentStatus: finalPaymentStatus,
+          shippingAddress: finalAddress,
+          shippingCity: finalCity,
+          shippingState: finalState,
+          shippingPostalCode: finalZip,
+          shippingCountry: finalCountry,
+          createdAt: createdOrder.created_at,
+        })
+        .catch((emailErr) => {
+          console.error(
+            `Failed to send order confirmation email for order #${createdOrder.order_number}:`,
+            emailErr.message
+          );
+        });
+    }
+
     return res.status(201).json({
       success: true,
       message: 'Order placed successfully! Thank you for your purchase.',
@@ -339,6 +418,15 @@ export const placeOrder = async (req, res) => {
 export const getUserOrders = async (req, res) => {
   try {
     const userId = req.user?.id;
+    const userEmail = req.user?.email ? String(req.user.email).trim().toLowerCase() : null;
+
+    if (!userId && !userEmail) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required to view your orders.',
+        orders: [],
+      });
+    }
 
     let queryText = `
       SELECT 
@@ -396,81 +484,20 @@ export const getUserOrders = async (req, res) => {
     `;
 
     const params = [];
-    if (userId) {
+    if (userId && userEmail) {
+      params.push(userId, userEmail);
+      queryText += ` WHERE (o.user_id = $1 OR (o.user_id IS NULL AND LOWER(o.customer_email) = $2))`;
+    } else if (userId) {
       params.push(userId);
-      if (req.user?.email) {
-        params.push(String(req.user.email).trim().toLowerCase());
-        queryText += ` WHERE (o.user_id = $1 OR LOWER(o.customer_email) = $2)`;
-      } else {
-        queryText += ` WHERE o.user_id = $1`;
-      }
+      queryText += ` WHERE o.user_id = $1`;
+    } else {
+      params.push(userEmail);
+      queryText += ` WHERE (o.user_id IS NULL AND LOWER(o.customer_email) = $1)`;
     }
 
     queryText += ` GROUP BY o.id, p.id, p.provider_payment_id, p.status ORDER BY o.id DESC LIMIT 50`;
 
-    let { rows } = await db.query(queryText, params);
-
-    // If logged-in user has 0 orders, fallback to seeded orders so UI always displays data
-    if (rows.length === 0) {
-      const fallback = await db.query(`
-        SELECT 
-          o.id,
-          o.order_number AS "orderNumber",
-          o.customer_name AS "customerName",
-          o.customer_email AS "customerEmail",
-          o.customer_phone AS "customerPhone",
-          o.shipping_address AS "shippingAddress",
-          o.shipping_city AS "shippingCity",
-          o.shipping_state AS "shippingState",
-          o.shipping_postal_code AS "shippingPostalCode",
-          o.shipping_country AS "shippingCountry",
-          o.subtotal,
-          o.shipping_fee AS "shippingFee",
-          o.tax,
-          o.total_amount AS "totalAmount",
-          o.status,
-          o.payment_status AS "paymentStatus",
-          o.payment_method AS "paymentMethod",
-          o.razorpay_order_id AS "razorpayOrderId",
-          o.razorpay_payment_id AS "razorpayPaymentId",
-          o.requires_gst_invoice AS "requiresGstInvoice",
-          o.customer_gstin AS "customerGstin",
-          o.billing_business_name AS "billingBusinessName",
-          o.billing_address AS "billingAddress",
-          o.invoice_number AS "invoiceNumber",
-          o.invoice_date AS "invoiceDate",
-          o.delivery_date AS "deliveryDate",
-          p.id AS "paymentId",
-          p.provider_payment_id AS "paymentProviderPaymentId",
-          p.status AS "paymentRecordStatus",
-          o.created_at AS "createdAt",
-          o.updated_at AS "updatedAt",
-          COALESCE(
-            json_agg(
-              json_build_object(
-                'id', oi.id,
-                'productId', oi.product_id,
-                'name', oi.product_name,
-                'sku', oi.product_sku,
-                'image', oi.product_image,
-                'price', oi.price,
-                'quantity', oi.quantity,
-                'totalPrice', oi.total_price
-              )
-            ) FILTER (WHERE oi.id IS NOT NULL),
-            '[]'
-          ) AS items
-        FROM orders o
-        LEFT JOIN order_items oi ON o.id = oi.order_id
-        LEFT JOIN LATERAL (
-          SELECT id, provider_payment_id, status FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
-        ) p ON true
-        GROUP BY o.id, p.id, p.provider_payment_id, p.status
-        ORDER BY o.id DESC
-        LIMIT 50
-      `);
-      rows = fallback.rows;
-    }
+    const { rows } = await db.query(queryText, params);
 
     const orders = rows.map((ord) => ({
       ...ord,
@@ -490,11 +517,30 @@ export const getUserOrders = async (req, res) => {
   }
 };
 
-// Customer Get Single Order Details
+// Customer Get Single Order Details (RBAC - User's Own Order Only)
 export const getUserOrderById = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user?.id || null;
+    const userEmail = req.user?.email ? String(req.user.email).trim().toLowerCase() : null;
+
+    if (!userId && !userEmail) {
+      return res.status(401).json({ success: false, message: 'Authentication required to view order details.' });
+    }
+
+    let filterClause = '';
+    const params = [String(id)];
+
+    if (userId && userEmail) {
+      params.push(userId, userEmail);
+      filterClause = `AND (o.user_id = $2 OR (o.user_id IS NULL AND LOWER(o.customer_email) = $3))`;
+    } else if (userId) {
+      params.push(userId);
+      filterClause = `AND o.user_id = $2`;
+    } else {
+      params.push(userEmail);
+      filterClause = `AND (o.user_id IS NULL AND LOWER(o.customer_email) = $2)`;
+    }
 
     const { rows } = await db.query(
       `SELECT 
@@ -549,9 +595,9 @@ export const getUserOrderById = async (req, res) => {
       LEFT JOIN LATERAL (
         SELECT id, provider_payment_id, status FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
       ) p ON true
-      WHERE (o.id::text = $1::text OR o.order_number::text = $1::text) AND ($2::text IS NULL OR o.user_id::text = $2::text)
+      WHERE (o.id::text = $1::text OR o.order_number::text = $1::text) ${filterClause}
       GROUP BY o.id, p.id, p.provider_payment_id, p.status`,
-      [String(id), userId ? String(userId) : null]
+      params
     );
 
     if (rows.length === 0) {

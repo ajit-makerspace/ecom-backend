@@ -18,8 +18,8 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const SENDER_EMAIL = process.env.SMTP_FROM || 'atin.d@makerspacemasters.com';
-const SENDER_NAME = process.env.SMTP_FROM_NAME || 'MakerSpace Masters';
+const SENDER_EMAIL = process.env.SMTP_FROM || 'makerspacemasters.com';
+const SENDER_NAME = process.env.SMTP_FROM_NAME || 'Makerspace Masters';
 
 /**
  * Generate standard HTML template layout
@@ -153,16 +153,16 @@ function getEmailLayout({ title, previewText, bodyContent }) {
     <div class="container">
       <div class="header">
         <div class="header-tag">MAKERSPACE SECURITY</div>
-        <h1 class="header-title">MakerSpace Masters</h1>
+        <h1 class="header-title">Makerspace Masters</h1>
         <div class="header-sub">Hardware & STEM Innovation Hub</div>
       </div>
       <div class="content">
         ${bodyContent}
       </div>
       <div class="footer">
-        <p style="margin: 0 0 6px 0;">This email was sent by <strong>MakerSpace Masters</strong>.</p>
+        <p style="margin: 0 0 6px 0;">This email was sent by <strong>Makerspace Masters</strong>.</p>
         <p style="margin: 0 0 6px 0;">For inquiries or security assistance, contact <a href="mailto:${SENDER_EMAIL}">${SENDER_EMAIL}</a>.</p>
-        <p style="margin: 0; color: #cbd5e1;">© ${new Date().getFullYear()} MakerSpace Masters. All rights reserved.</p>
+        <p style="margin: 0; color: #cbd5e1;">© ${new Date().getFullYear()} Makerspace Masters. All rights reserved.</p>
       </div>
     </div>
   </div>
@@ -175,7 +175,7 @@ function getEmailLayout({ title, previewText, bodyContent }) {
  * Send 6-Digit Email Login OTP
  */
 export async function sendLoginOtpEmail({ email, otp, firstName = 'Maker' }) {
-  const subject = `Your MakerSpace Login Code: ${otp}`;
+  const subject = `Your Makerspace Login Code: ${otp}`;
   const previewText = `Your one-time login verification code is ${otp}. Valid for 10 minutes.`;
 
   const bodyContent = `
@@ -183,7 +183,7 @@ export async function sendLoginOtpEmail({ email, otp, firstName = 'Maker' }) {
       Hello ${firstName},
     </h2>
     <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0;">
-      We received a request to log in to your <strong>MakerSpace Masters</strong> account using this email address. Please use the one-time verification code below to complete your sign in:
+      We received a request to log in to your <strong>Makerspace Masters</strong> account using this email address. Please use the one-time verification code below to complete your sign in:
     </p>
 
     <div class="otp-box">
@@ -193,12 +193,12 @@ export async function sendLoginOtpEmail({ email, otp, firstName = 'Maker' }) {
     </div>
 
     <div class="info-card">
-      <strong>Security Notice:</strong> Never share this code with anyone. MakerSpace Masters staff will never ask for your verification code. If you did not initiate this request, you can safely disregard this email.
+      <strong>Security Notice:</strong> Never share this code with anyone. Makerspace Masters staff will never ask for your verification code. If you did not initiate this request, you can safely disregard this email.
     </div>
 
     <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0;">
       Happy Making,<br>
-      <strong>The MakerSpace Masters Team</strong>
+      <strong>The Makerspace Masters Team</strong>
     </p>
   `;
 
@@ -213,7 +213,7 @@ export async function sendLoginOtpEmail({ email, otp, firstName = 'Maker' }) {
     to: email,
     subject,
     html,
-    text: `Your MakerSpace Masters Login Code is: ${otp}. It is valid for 10 minutes. If you did not request this, please ignore this email.`,
+    text: `Your Makerspace Masters Login Code is: ${otp}. It is valid for 10 minutes. If you did not request this, please ignore this email.`,
   };
 
   const info = await transporter.sendMail(mailOptions);
@@ -224,12 +224,12 @@ export async function sendLoginOtpEmail({ email, otp, firstName = 'Maker' }) {
  * Send Welcome Email after successful registration
  */
 export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
-  const subject = `Welcome to MakerSpace Masters, ${firstName}! 🎉`;
-  const previewText = `Welcome to MakerSpace Masters! Explore 3D printers, robotics kits, and STEM tools.`;
+  const subject = `Welcome to Makerspace Masters, ${firstName}! 🎉`;
+  const previewText = `Welcome to Makerspace Masters! Explore 3D printers, robotics kits, and STEM tools.`;
 
   const bodyContent = `
     <h2 style="font-size: 18px; font-weight: 800; color: #002740; margin-top: 0; margin-bottom: 8px;">
-      Welcome to MakerSpace Masters, ${firstName}!
+      Welcome to Makerspace Masters, ${firstName}!
     </h2>
     <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0;">
       Your account has been successfully created. You now have full access to high-performance hardware, STEM robotics kits, curriculum modules, and rapid tech solutions.
@@ -253,7 +253,7 @@ export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
 
     <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0;">
       Warm regards,<br>
-      <strong>The MakerSpace Masters Team</strong>
+      <strong>The Makerspace Masters Team</strong>
     </p>
   `;
 
@@ -268,7 +268,198 @@ export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
     to: email,
     subject,
     html,
-    text: `Welcome to MakerSpace Masters, ${firstName}! Your account is now active.`,
+    text: `Welcome to Makerspace Masters, ${firstName}! Your account is now active.`,
+  };
+
+  const info = await transporter.sendMail(mailOptions);
+  return info;
+}
+
+/**
+ * Send Order Confirmation Email with line items, address, and pricing breakdown
+ */
+export async function sendOrderConfirmationEmail({
+  email,
+  customerName = 'Maker',
+  orderNumber,
+  items = [],
+  totalAmount = 0,
+  subtotal = 0,
+  shippingFee = 0,
+  tax = 0,
+  paymentMethod = 'Online Payment',
+  paymentStatus = 'Paid',
+  shippingAddress = '',
+  shippingCity = '',
+  shippingState = '',
+  shippingPostalCode = '',
+  shippingCountry = 'India',
+  createdAt = new Date(),
+}) {
+  const subject = `Order Confirmed #${orderNumber} 🎉 - Makerspace Masters`;
+  const formatINR = (val) =>
+    `₹${parseFloat(val || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+
+  const formattedDate = new Date(createdAt).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  const previewText = `Thank you for your order #${orderNumber}! Total: ${formatINR(totalAmount)}. We're getting it ready.`;
+
+  const addressParts = [
+    shippingAddress,
+    shippingCity,
+    shippingState ? `${shippingState} ${shippingPostalCode || ''}`.trim() : shippingPostalCode,
+    shippingCountry,
+  ].filter(Boolean);
+  const formattedAddress = addressParts.join(', ');
+
+  const itemsHtml = (items || [])
+    .map((item) => {
+      const itemPrice = parseFloat(item.price || 0);
+      const itemQty = parseInt(item.quantity || 1, 10);
+      const lineTotal = parseFloat(item.lineTotal || item.totalPrice || itemPrice * itemQty);
+      return `
+        <tr>
+          <td style="padding: 12px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle;">
+            <div style="font-weight: 700; color: #002740; font-size: 13px;">${item.name || 'Maker Item'}</div>
+            ${item.sku ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">SKU: ${item.sku}</div>` : ''}
+          </td>
+          <td style="padding: 12px 8px; border-bottom: 1px solid #e2e8f0; text-align: center; color: #475569; font-size: 12px; vertical-align: middle;">
+            ${itemQty}
+          </td>
+          <td style="padding: 12px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; color: #475569; font-size: 12px; vertical-align: middle;">
+            ${formatINR(itemPrice)}
+          </td>
+          <td style="padding: 12px 8px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 700; color: #002740; font-size: 13px; vertical-align: middle;">
+            ${formatINR(lineTotal)}
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  const bodyContent = `
+    <h2 style="font-size: 18px; font-weight: 800; color: #002740; margin-top: 0; margin-bottom: 8px;">
+      Thank You for Your Order, ${customerName}!
+    </h2>
+    <p style="font-size: 13px; color: #475569; margin: 0 0 20px 0; line-height: 1.5;">
+      We've received your order <strong>#${orderNumber}</strong> and our team is already working on preparing it for dispatch. You can track your order status in your account at any time.
+    </p>
+
+    <!-- Order Metadata Card -->
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <tr>
+          <td style="padding: 4px 0; color: #64748b;">Order Number:</td>
+          <td style="padding: 4px 0; text-align: right; font-weight: 800; color: #002740; font-family: monospace; font-size: 13px;">${orderNumber}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #64748b;">Order Date:</td>
+          <td style="padding: 4px 0; text-align: right; font-weight: 600; color: #334155;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #64748b;">Payment Method:</td>
+          <td style="padding: 4px 0; text-align: right; font-weight: 600; color: #334155;">${paymentMethod}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #64748b;">Payment Status:</td>
+          <td style="padding: 4px 0; text-align: right; font-weight: 700; color: #059669;">${paymentStatus}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Delivery Address Card -->
+    ${
+      formattedAddress
+        ? `
+      <div style="margin-bottom: 24px;">
+        <h3 style="font-size: 13px; font-weight: 800; color: #002740; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">
+          Shipping Address
+        </h3>
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px; font-size: 12px; color: #334155; line-height: 1.5;">
+          <strong>${customerName}</strong><br>
+          ${formattedAddress}
+        </div>
+      </div>
+    `
+        : ''
+    }
+
+    <!-- Ordered Items Table -->
+    <div style="margin-bottom: 24px;">
+      <h3 style="font-size: 13px; font-weight: 800; color: #002740; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 10px 0;">
+        Items in This Order
+      </h3>
+      <table style="width: 100%; border-collapse: collapse; margin-top: 6px;">
+        <thead>
+          <tr style="background: #f1f5f9; text-align: left; font-size: 11px; text-transform: uppercase; color: #475569;">
+            <th style="padding: 8px; font-weight: 700;">Item</th>
+            <th style="padding: 8px; font-weight: 700; text-align: center;">Qty</th>
+            <th style="padding: 8px; font-weight: 700; text-align: right;">Price</th>
+            <th style="padding: 8px; font-weight: 700; text-align: right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pricing Summary -->
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <tr>
+          <td style="padding: 4px 0; color: #64748b;">Subtotal:</td>
+          <td style="padding: 4px 0; text-align: right; color: #334155; font-weight: 600;">${formatINR(subtotal || totalAmount)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #64748b;">Shipping Fee:</td>
+          <td style="padding: 4px 0; text-align: right; font-weight: 600; color: ${shippingFee > 0 ? '#334155' : '#059669'};">
+            ${shippingFee > 0 ? formatINR(shippingFee) : 'FREE'}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #64748b;">Taxes (GST):</td>
+          <td style="padding: 4px 0; text-align: right; color: #334155; font-weight: 600;">${formatINR(tax || 0)}</td>
+        </tr>
+        <tr style="border-top: 2px solid #e2e8f0;">
+          <td style="padding: 10px 0 0 0; font-size: 14px; font-weight: 900; color: #002740;">Total Amount:</td>
+          <td style="padding: 10px 0 0 0; text-align: right; font-size: 16px; font-weight: 900; color: #0071e3;">${formatINR(totalAmount)}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Call to action button -->
+    <div style="text-align: center; margin: 32px 0 20px 0;">
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/user/orders" style="display: inline-block; background: #002740; color: #ffffff; padding: 14px 32px; border-radius: 10px; font-size: 13px; font-weight: 800; text-decoration: none; box-shadow: 0 4px 12px rgba(0, 39, 64, 0.2);">
+        View & Track Your Order &rarr;
+      </a>
+    </div>
+
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0; line-height: 1.6;">
+      Need any help with your shipment? Reach out to us at <a href="mailto:${SENDER_EMAIL}" style="color: #0071e3; text-decoration: underline;">${SENDER_EMAIL}</a>.<br>
+      Thank you for shopping with <strong>MakerSpace Masters</strong>!
+    </p>
+  `;
+
+  const html = getEmailLayout({
+    title: subject,
+    previewText,
+    bodyContent,
+  });
+
+  const mailOptions = {
+    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+    to: email,
+    subject,
+    html,
+    text: `Thank you for your order #${orderNumber}! Total: ${formatINR(totalAmount)}. Track your order at ${process.env.FRONTEND_URL || 'http://localhost:3000'}/user/orders.`,
   };
 
   const info = await transporter.sendMail(mailOptions);
@@ -279,4 +470,5 @@ export default {
   transporter,
   sendLoginOtpEmail,
   sendWelcomeEmail,
+  sendOrderConfirmationEmail,
 };

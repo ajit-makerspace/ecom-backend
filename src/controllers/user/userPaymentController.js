@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import db from '../../config/db.js';
+import { generateOrderNumber } from '../../utils/orderNumberGenerator.js';
+import emailService from '../../services/emailService.js';
 
 // Ensure Razorpay tracking columns and payments table exist in DB
 export async function ensureOrderRazorpayColumns() {
@@ -284,11 +286,32 @@ export const verifyRazorpayPayment = async (req, res) => {
     const tax = 0.0;
     const totalAmount = subtotal + shippingFee + tax;
 
-    const orderNumber = `MS-${Math.floor(100000 + Math.random() * 900000)}`;
+    const orderNumber = await generateOrderNumber(client);
     const customerName = `${finalFirstName.trim()} ${(finalLastName || '').trim()}`.trim();
     const customerEmail = String(finalEmail).trim().toLowerCase();
     const customerPhone = finalPhone ? String(finalPhone).trim() : null;
-    const userId = req.user?.id || null;
+    let userId = req.user?.id || null;
+    if (!userId && customerEmail) {
+      try {
+        const userLookup = await client.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [customerEmail]);
+        if (userLookup.rows.length > 0) {
+          userId = userLookup.rows[0].id;
+        }
+      } catch (e) {
+        console.error('Error looking up user by email in verifyRazorpayPayment:', e);
+      }
+    }
+
+    if (userId && customerPhone) {
+      try {
+        await client.query(
+          `UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2 AND (phone IS NULL OR phone = '')`,
+          [customerPhone, userId]
+        );
+      } catch (e) {
+        console.error('Error updating user phone in verifyRazorpayPayment:', e);
+      }
+    }
 
     // 2. Insert into orders table with Razorpay payment details
     const orderInsertSql = `
@@ -479,6 +502,35 @@ export const verifyRazorpayPayment = async (req, res) => {
     const createdPayment = paymentResult.rows[0];
 
     await client.query('COMMIT');
+
+    // Trigger Order Confirmation Email
+    if (finalEmail) {
+      emailService
+        .sendOrderConfirmationEmail({
+          email: finalEmail,
+          customerName: customerName || 'Valued Customer',
+          orderNumber: createdOrder.order_number,
+          items: validatedItems,
+          totalAmount,
+          subtotal,
+          shippingFee,
+          tax,
+          paymentMethod: 'Razorpay',
+          paymentStatus: 'Paid',
+          shippingAddress: finalAddress,
+          shippingCity: finalCity,
+          shippingState: finalState,
+          shippingPostalCode: finalZip,
+          shippingCountry: finalCountry,
+          createdAt: createdOrder.created_at,
+        })
+        .catch((emailErr) => {
+          console.error(
+            `Failed to send order confirmation email for order #${createdOrder.order_number}:`,
+            emailErr.message
+          );
+        });
+    }
 
     return res.status(201).json({
       success: true,

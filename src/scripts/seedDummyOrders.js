@@ -24,14 +24,14 @@ export async function seedDummyOrders() {
     }
 
     // 3. Clear older dummy orders to prevent duplicates
-    await db.query(`DELETE FROM orders WHERE order_number IN ('A35545vs43', 'MS-829104', 'MS-740219', 'MS-619842', 'MS-512093', 'MS-948120')`);
+    await db.query(`DELETE FROM orders WHERE order_number IN ('A35545vs43', 'MS-829104', 'MS-740219', 'MS-619842', 'MS-512093', 'MS-948120', 'MSM26271001', 'MSM26271002', 'MSM26271003', 'MSM26271004', 'MSM26271005')`);
 
     // Target user IDs: assign orders to each registered user (and null for guest)
     const targetUserIds = users.length > 0 ? users.map((u) => u.id) : [null];
 
     const orderTemplates = [
       {
-        orderNumber: 'A35545vs43',
+        orderNumber: 'MSM26271005',
         customerName: 'Khushi Oberoi',
         createdAt: '2026-11-15T10:30:00Z',
         status: 'Delivered',
@@ -45,7 +45,7 @@ export async function seedDummyOrders() {
         ],
       },
       {
-        orderNumber: 'MS-829104',
+        orderNumber: 'MSM26271004',
         customerName: 'Khushi Oberoi',
         createdAt: '2026-11-12T14:20:00Z',
         status: 'In Transit',
@@ -57,7 +57,7 @@ export async function seedDummyOrders() {
         ],
       },
       {
-        orderNumber: 'MS-740219',
+        orderNumber: 'MSM26271003',
         customerName: 'Khushi Oberoi',
         createdAt: '2026-10-28T16:45:00Z',
         status: 'Delivered',
@@ -70,7 +70,7 @@ export async function seedDummyOrders() {
         ],
       },
       {
-        orderNumber: 'MS-619842',
+        orderNumber: 'MSM26271002',
         customerName: 'Khushi Oberoi',
         createdAt: '2026-09-14T11:10:00Z',
         status: 'Delivered',
@@ -82,7 +82,7 @@ export async function seedDummyOrders() {
         ],
       },
       {
-        orderNumber: 'MS-512093',
+        orderNumber: 'MSM26271001',
         customerName: 'Khushi Oberoi',
         createdAt: '2026-08-05T09:00:00Z',
         status: 'Delivered',

@@ -11,8 +11,8 @@ const router = express.Router();
 // Public / Authenticated Order Placement (Checkout)
 router.post('/orders', optionalAuth, placeOrder);
 
-// Customer Order History & Tracking (Authenticated or Guest Fallback)
-router.get('/orders', optionalAuth, getUserOrders);
-router.get('/orders/:id', optionalAuth, getUserOrderById);
+// Customer Order History & Tracking (Strict Authenticated RBAC)
+router.get('/orders', authenticateToken, getUserOrders);
+router.get('/orders/:id', authenticateToken, getUserOrderById);
 
 export default router;

@@ -1,4 +1,5 @@
 import db from '../../config/db.js';
+import { getFiscalYearCode } from '../../utils/orderNumberGenerator.js';
 
 // Raw SQL Get Admin Orders (with items, customer details, and shipping)
 export const getOrders = async (req, res) => {
@@ -60,7 +61,7 @@ export const getOrders = async (req, res) => {
       return {
         ...o,
         id: String(o.id), // String ID for safe frontend search
-        orderNumber: o.orderNumber,
+        orderNumber: o.orderNumber || (o.id ? `MSM${getFiscalYearCode(o.createdAt)}${1000 + parseInt(o.id, 10)}` : ''),
         totalAmount,
         total: totalAmount,
         subtotal: parseFloat(o.subtotal || totalAmount),
@@ -68,7 +69,7 @@ export const getOrders = async (req, res) => {
         tax: parseFloat(o.tax || 0),
         deliveryDate: o.deliveryDate,
         date: new Date(o.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        customerAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&q=80',
+        customerAvatar: null,
         items: Array.isArray(o.items) ? o.items.map((it) => ({
           ...it,
           price: parseFloat(it.price || 0),
