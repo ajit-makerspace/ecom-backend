@@ -157,7 +157,7 @@ export const registerUser = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'Registration successful! Welcome to MakerSpace Shop.',
+      message: 'Registration successful! Welcome to Makerspace Shop.',
       token,
       user: {
         id: user.id,

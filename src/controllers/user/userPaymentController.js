@@ -392,6 +392,16 @@ export const verifyRazorpayPayment = async (req, res) => {
     const orderResult = await client.query(orderInsertSql, orderValues);
     const createdOrder = orderResult.rows[0];
 
+    // If user has no phone in profile, update it from order
+    if (userId && customerPhone) {
+      try {
+        await client.query(
+          `UPDATE users SET phone = $1 WHERE id = $2 AND (phone IS NULL OR phone = '')`,
+          [customerPhone, userId]
+        );
+      } catch (_) {}
+    }
+
     // If customer provided GST profile and is logged in, upsert into user_gst_numbers
     if (userId && customerGstin && billingBusinessName) {
       try {
