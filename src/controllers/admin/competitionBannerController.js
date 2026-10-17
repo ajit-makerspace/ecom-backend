@@ -85,6 +85,20 @@ const formatBanner = (banner) => ({
   isActive: banner.status === 1,
   status: banner.status === 1 ? 'Active' : 'Inactive',
 });
+const validateCompetitionDates = (competitionDate, registrationStartDate) => {
+  const competition = normalizeDate(competitionDate);
+  const registration = normalizeDate(registrationStartDate);
+
+  if (!competition || !registration) {
+    return null; // Keep invalid/missing-date handling in existing validation
+  }
+
+  if (registration > competition) {
+    return 'Registration Start Date must be on or before the Competition Date.';
+  }
+
+  return null;
+};
 
 /* -------------------------------------------------------
    GET /api/admin/competition-banners
@@ -799,6 +813,17 @@ export const createCompetition = async (req, res, next) => {
   try {
     const body = req.body || {};
     const errors = validateCompetition(body);
+    const dateError = validateCompetitionDates(
+  body.competitionDate ?? body.competition_date,
+  body.registrationStartDate ?? body.registration_start_date
+);
+
+if (dateError) {
+  return res.status(400).json({
+    success: false,
+    message: dateError,
+  });
+}
 
     if (errors.length > 0) {
       return res.status(400).json({
@@ -935,6 +960,18 @@ export const updateCompetition = async (req, res, next) => {
         existing.registration_start_date
       )
     );
+
+    const dateError = validateCompetitionDates(
+  competitionDate,
+  registrationStartDate
+);
+
+if (dateError) {
+  return res.status(400).json({
+    success: false,
+    message: dateError,
+  });
+}
 
     const topic = normalizeText(
       pick('topic', null, existing.topic)
