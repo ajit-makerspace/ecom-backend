@@ -136,6 +136,78 @@ export const getPublicBanners = async (req, res) => {
 /* ------------------------------------------------------------------ */
 /* 3. Create Banner (Admin)                                            */
 /* ------------------------------------------------------------------ */
+// export const createBanner = async (req, res) => {
+//   try {
+//     const {
+//       title,
+//       subtitle,
+//       ctaText,
+//       ctaLink,
+//       secondaryText,
+//       secondaryLink,
+//       mediaType,
+//       imageUrl,
+//       videoUrl,
+//       sortOrder,
+//       status,
+//       startsAt,
+//       endsAt,
+//     } = req.body;
+
+//     if (!title || !title.trim()) {
+//       return res.status(400).json({ success: false, message: 'Banner title is required.' });
+//     }
+
+//     const media = resolveMedia({ mediaType, imageUrl, videoUrl });
+//     if (media.error) {
+//       return res.status(400).json({ success: false, message: media.error });
+//     }
+
+//     const statusInt = toStatusInt(status);
+//     const orderInt = parseInt(sortOrder, 10) || 0;
+//     const finalStartsAt = startsAt ? new Date(startsAt) : (req.body.starts_at ? new Date(req.body.starts_at) : null);
+//     const finalEndsAt = endsAt ? new Date(endsAt) : (req.body.ends_at ? new Date(req.body.ends_at) : null);
+
+//     const { rows } = await db.query(
+//       `INSERT INTO banners
+//        (title, subtitle, cta_text, cta_link, secondary_text, secondary_link,
+//         media_type, image_url, video_url, sort_order, status, updated_at)
+//        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+//        RETURNING ${BANNER_COLUMNS}, status, created_at AS "createdAt"`,
+//       [
+//         title.trim(),
+//         subtitle || '',
+//         ctaText || 'Explore Hardware',
+//         ctaLink || '/user/products',
+//         secondaryText || '',
+//         secondaryLink || '',
+//         media.mediaType,
+//         media.imageUrl,
+//         media.videoUrl,
+//         orderInt,
+//         statusInt,
+//         finalStartsAt,
+//         finalEndsAt,
+//       ]
+//     );
+
+//     const created = rows[0];
+//     created.status = created.status === 1 ? 'Active' : 'Inactive';
+
+//     return res.status(201).json({
+//       success: true,
+//       message: 'Banner created successfully.',
+//       banner: created,
+//     });
+//   } catch (err) {
+//     console.error('Create Banner Error:', err);
+//     return res.status(500).json({ success: false, message: 'Failed to create banner.' });
+//   }
+// };
+
+
+
+
 export const createBanner = async (req, res) => {
   try {
     const {
@@ -155,25 +227,61 @@ export const createBanner = async (req, res) => {
     } = req.body;
 
     if (!title || !title.trim()) {
-      return res.status(400).json({ success: false, message: 'Banner title is required.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Banner title is required.',
+      });
     }
 
     const media = resolveMedia({ mediaType, imageUrl, videoUrl });
+
     if (media.error) {
-      return res.status(400).json({ success: false, message: media.error });
+      return res.status(400).json({
+        success: false,
+        message: media.error,
+      });
     }
 
     const statusInt = toStatusInt(status);
     const orderInt = parseInt(sortOrder, 10) || 0;
-    const finalStartsAt = startsAt ? new Date(startsAt) : (req.body.starts_at ? new Date(req.body.starts_at) : null);
-    const finalEndsAt = endsAt ? new Date(endsAt) : (req.body.ends_at ? new Date(req.body.ends_at) : null);
+
+    const finalStartsAt = startsAt
+      ? new Date(startsAt)
+      : req.body.starts_at
+        ? new Date(req.body.starts_at)
+        : null;
+
+    const finalEndsAt = endsAt
+      ? new Date(endsAt)
+      : req.body.ends_at
+        ? new Date(req.body.ends_at)
+        : null;
 
     const { rows } = await db.query(
-      `INSERT INTO banners
-       (title, subtitle, cta_text, cta_link, secondary_text, secondary_link,
-        media_type, image_url, video_url, sort_order, status, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-       RETURNING ${BANNER_COLUMNS}, status, created_at AS "createdAt"`,
+      `INSERT INTO banners (
+        title,
+        subtitle,
+        cta_text,
+        cta_link,
+        secondary_text,
+        secondary_link,
+        media_type,
+        image_url,
+        video_url,
+        sort_order,
+        status,
+        starts_at,
+        ends_at,
+        updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13, NOW()
+      )
+      RETURNING ${BANNER_COLUMNS}, status,
+                starts_at AS "startsAt",
+                ends_at AS "endsAt",
+                created_at AS "createdAt"`,
       [
         title.trim(),
         subtitle || '',
@@ -192,6 +300,7 @@ export const createBanner = async (req, res) => {
     );
 
     const created = rows[0];
+
     created.status = created.status === 1 ? 'Active' : 'Inactive';
 
     return res.status(201).json({
@@ -201,7 +310,11 @@ export const createBanner = async (req, res) => {
     });
   } catch (err) {
     console.error('Create Banner Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to create banner.' });
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create banner.',
+    });
   }
 };
 

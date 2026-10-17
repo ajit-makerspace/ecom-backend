@@ -826,8 +826,181 @@ export const deleteProduct = async (req, res) => {
 
 // 5. Bulk Import Products
 
+// export const bulkImportProducts = async (req, res) => {
+//   const client = await db.pool.connect();
+
+//   try {
+//     const { products } = req.body;
+
+//     if (!Array.isArray(products) || products.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'No valid products provided for import.',
+//       });
+//     }
+
+//     await client.query('BEGIN');
+
+//     const createdProducts = [];
+
+//     for (let i = 0; i < products.length; i++) {
+//       const item = products[i];
+
+//       const name = String(
+//         item.name || item['Product Name'] || ''
+//       ).trim();
+
+//       if (!name) continue;
+
+//       const catId = item.categoryId
+//         ? parseInt(item.categoryId, 10)
+//         : 1;
+
+//       const subCatId = item.subCategoryId
+//         ? parseInt(item.subCategoryId, 10)
+//         : null;
+
+//       const price =
+//         parseFloat(item.price ?? item['Price']) || 0;
+
+//       const oldPrice =
+//         item.oldPrice || item['Old Price']
+//           ? parseFloat(item.oldPrice ?? item['Old Price'])
+//           : null;
+
+//       const weight = item.weight
+//         ? parseFloat(item.weight)
+//         : null;
+
+//       // Resolve the brand to brand_logos.id.
+//       // A CSV brand name is reused or created by resolveBrandId.
+//       const resolvedBrandId = await resolveBrandId(client, {
+//         brandId: item.brandId ?? item.brand_id,
+//         newBrandName:
+//           item.newBrandName ||
+//           item.newBrand?.name ||
+//           item.brand ||
+//           item.Brand,
+//         newBrandLogoUrl:
+//           item.newBrandLogoUrl ||
+//           item.newBrand?.logoUrl ||
+//           item.newBrand?.logo_url,
+//       });
+
+//       const sku = item.sku
+//         ? String(item.sku).trim()
+//         : `SKU-IMP-${Date.now().toString().slice(-4)}-${i}`;
+
+//       const description = String(
+//         item.description || item.Description || ''
+//       ).trim();
+
+//       const image = String(
+//         item.image ||
+//         item.image_url ||
+//         item['Image URL'] ||
+//         ''
+//       ).trim();
+
+//       const statusInt =
+//         String(item.status || item.Status || 'Active')
+//           .toLowerCase() === 'active'
+//           ? 1
+//           : 2;
+
+//       const slug =
+//         `${slugify(name)}-${Date.now().toString().slice(-4)}-${i}`;
+
+//       const resInsert = await client.query(
+//         `INSERT INTO products (
+//           category_id,
+//           sub_category_id,
+//           name,
+//           slug,
+//           sku,
+//           description,
+//           brand_id,
+//           price,
+//           old_price,
+//           weight,
+//           image_url,
+//           status
+//         )
+//         VALUES (
+//           $1, $2, $3, $4, $5, $6,
+//           $7, $8, $9, $10, $11, $12
+//         )
+//         RETURNING
+//           id,
+//           name,
+//           slug,
+//           sku,
+//           category_id AS "categoryId",
+//           sub_category_id AS "subCategoryId",
+//           price,
+//           old_price AS "oldPrice",
+//           weight,
+//           brand_id AS "brandId",
+//           image_url AS "image",
+//           status`,
+//         [
+//           catId,
+//           subCatId,
+//           name,
+//           slug,
+//           sku,
+//           description,
+//           resolvedBrandId,
+//           price,
+//           oldPrice,
+//           weight,
+//           image,
+//           statusInt,
+//         ]
+//       );
+
+//       const prod = resInsert.rows[0];
+
+//       prod.price = parseFloat(prod.price || 0);
+//       prod.oldPrice = prod.oldPrice
+//         ? parseFloat(prod.oldPrice)
+//         : null;
+//       prod.weight = prod.weight
+//         ? parseFloat(prod.weight)
+//         : null;
+
+//       prod.status =
+//         prod.status === 1 ? 'Active' : 'Inactive';
+
+//       createdProducts.push(prod);
+//     }
+
+//     await client.query('COMMIT');
+
+//     return res.status(201).json({
+//       success: true,
+//       message: `Successfully imported ${createdProducts.length} products.`,
+//       products: createdProducts,
+//     });
+//   } catch (err) {
+//     await client.query('ROLLBACK');
+
+//     console.error('Bulk Import Products Error:', err);
+
+//     return res.status(500).json({
+//       success: false,
+//       message:
+//         err.message || 'Failed to bulk import products.',
+//     });
+//   } finally {
+//     client.release();
+//   }
+// };
+
 export const bulkImportProducts = async (req, res) => {
-  const client = await db.pool.connect();
+  let client;
+  let transactionStarted = false;
+  let currentRow = null;
 
   try {
     const { products } = req.body;
@@ -839,160 +1012,478 @@ export const bulkImportProducts = async (req, res) => {
       });
     }
 
+    client = await db.pool.connect();
+
     await client.query('BEGIN');
+    transactionStarted = true;
 
     const createdProducts = [];
 
     for (let i = 0; i < products.length; i++) {
-      const item = products[i];
+      const item = products[i] || {};
 
       const name = String(
         item.name || item['Product Name'] || ''
       ).trim();
 
+      // Preserve the existing behavior of skipping empty product names.
       if (!name) continue;
 
-      const catId = item.categoryId
-        ? parseInt(item.categoryId, 10)
-        : 1;
+      // CSV row 1 is assumed to contain the column headings.
+      currentRow = {
+        number: i + 2,
+        name,
+      };
 
-      const subCatId = item.subCategoryId
-        ? parseInt(item.subCategoryId, 10)
-        : null;
+      try {
+        // ---------------------------------------------------------
+        // 1. Validate category ID
+        // ---------------------------------------------------------
+        const rawCategoryId =
+          item.categoryId ??
+          item.category_id ??
+          item['Category ID'];
 
-      const price =
-        parseFloat(item.price ?? item['Price']) || 0;
+        if (
+          rawCategoryId === undefined ||
+          rawCategoryId === null ||
+          String(rawCategoryId).trim() === ''
+        ) {
+          throw new Error('Category ID is required.');
+        }
 
-      const oldPrice =
-        item.oldPrice || item['Old Price']
-          ? parseFloat(item.oldPrice ?? item['Old Price'])
-          : null;
+        const catId = Number(rawCategoryId);
 
-      const weight = item.weight
-        ? parseFloat(item.weight)
-        : null;
+        if (!Number.isSafeInteger(catId) || catId <= 0) {
+          throw new Error(
+            `Category ID "${rawCategoryId}" is invalid. Please provide a valid numeric category ID.`
+          );
+        }
 
-      // Resolve the brand to brand_logos.id.
-      // A CSV brand name is reused or created by resolveBrandId.
-      const resolvedBrandId = await resolveBrandId(client, {
-        brandId: item.brandId ?? item.brand_id,
-        newBrandName:
-          item.newBrandName ||
-          item.newBrand?.name ||
-          item.brand ||
-          item.Brand,
-        newBrandLogoUrl:
-          item.newBrandLogoUrl ||
-          item.newBrand?.logoUrl ||
-          item.newBrand?.logo_url,
-      });
+        const categoryResult = await client.query(
+          `SELECT id, name
+           FROM categories
+           WHERE id = $1
+             AND status != 2`,
+          [catId]
+        );
 
-      const sku = item.sku
-        ? String(item.sku).trim()
-        : `SKU-IMP-${Date.now().toString().slice(-4)}-${i}`;
+        if (categoryResult.rows.length === 0) {
+          throw new Error(
+            `Category ID ${catId} does not exist or has been deleted. Please check the category ID in your CSV.`
+          );
+        }
 
-      const description = String(
-        item.description || item.Description || ''
-      ).trim();
+        // ---------------------------------------------------------
+        // 2. Validate subcategory ID and category relationship
+        // ---------------------------------------------------------
+        const rawSubCategoryId =
+          item.subCategoryId ??
+          item.sub_category_id ??
+          item['Subcategory ID'];
 
-      const image = String(
-        item.image ||
-        item.image_url ||
-        item['Image URL'] ||
-        ''
-      ).trim();
+        let subCatId = null;
 
-      const statusInt =
-        String(item.status || item.Status || 'Active')
-          .toLowerCase() === 'active'
-          ? 1
-          : 2;
+        if (
+          rawSubCategoryId !== undefined &&
+          rawSubCategoryId !== null &&
+          String(rawSubCategoryId).trim() !== ''
+        ) {
+          subCatId = Number(rawSubCategoryId);
 
-      const slug =
-        `${slugify(name)}-${Date.now().toString().slice(-4)}-${i}`;
+          if (
+            !Number.isSafeInteger(subCatId) ||
+            subCatId <= 0
+          ) {
+            throw new Error(
+              `Subcategory ID "${rawSubCategoryId}" is invalid. Please provide a valid numeric subcategory ID.`
+            );
+          }
 
-      const resInsert = await client.query(
-        `INSERT INTO products (
-          category_id,
-          sub_category_id,
-          name,
-          slug,
-          sku,
-          description,
-          brand_id,
-          price,
-          old_price,
-          weight,
-          image_url,
-          status
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6,
-          $7, $8, $9, $10, $11, $12
-        )
-        RETURNING
-          id,
-          name,
-          slug,
-          sku,
-          category_id AS "categoryId",
-          sub_category_id AS "subCategoryId",
-          price,
-          old_price AS "oldPrice",
-          weight,
-          brand_id AS "brandId",
-          image_url AS "image",
-          status`,
-        [
-          catId,
-          subCatId,
-          name,
-          slug,
-          sku,
-          description,
-          resolvedBrandId,
-          price,
-          oldPrice,
-          weight,
-          image,
-          statusInt,
-        ]
+          const subcategoryResult = await client.query(
+            `SELECT id, name, category_id
+             FROM subcategories
+             WHERE id = $1
+               AND status != 2`,
+            [subCatId]
+          );
+
+          if (subcategoryResult.rows.length === 0) {
+            throw new Error(
+              `Subcategory ID ${subCatId} does not exist or has been deleted. Please check the subcategory ID in your CSV.`
+            );
+          }
+
+          const subcategory = subcategoryResult.rows[0];
+
+          if (Number(subcategory.category_id) !== catId) {
+            throw new Error(
+              `Subcategory "${subcategory.name}" (ID ${subCatId}) does not belong to category "${categoryResult.rows[0].name}" (ID ${catId}). Please select a subcategory belonging to the selected category.`
+            );
+          }
+        }
+
+        // ---------------------------------------------------------
+        // 3. Validate price and optional numeric fields
+        // ---------------------------------------------------------
+        const rawPrice = item.price ?? item['Price'];
+
+        if (
+          rawPrice === undefined ||
+          rawPrice === null ||
+          String(rawPrice).trim() === ''
+        ) {
+          throw new Error('Product price is required.');
+        }
+
+        const price = Number(rawPrice);
+
+        if (!Number.isFinite(price) || price < 0) {
+          throw new Error(
+            `Price "${rawPrice}" is invalid. Please provide a valid non-negative number.`
+          );
+        }
+
+        const rawOldPrice =
+          item.oldPrice ?? item['Old Price'];
+
+        let oldPrice = null;
+
+        if (
+          rawOldPrice !== undefined &&
+          rawOldPrice !== null &&
+          String(rawOldPrice).trim() !== ''
+        ) {
+          oldPrice = Number(rawOldPrice);
+
+          if (!Number.isFinite(oldPrice) || oldPrice < 0) {
+            throw new Error(
+              `Old Price "${rawOldPrice}" is invalid. Please provide a valid non-negative number.`
+            );
+          }
+        }
+
+        let weight = null;
+
+        if (
+          item.weight !== undefined &&
+          item.weight !== null &&
+          String(item.weight).trim() !== ''
+        ) {
+          weight = Number(item.weight);
+
+          if (!Number.isFinite(weight) || weight < 0) {
+            throw new Error(
+              `Weight "${item.weight}" is invalid. Please provide a valid non-negative number.`
+            );
+          }
+        }
+
+        // ---------------------------------------------------------
+        // 4. Resolve brand using the existing helper
+        // ---------------------------------------------------------
+        const resolvedBrandId = await resolveBrandId(client, {
+          brandId: item.brandId ?? item.brand_id,
+          newBrandName:
+            item.newBrandName ||
+            item.newBrand?.name ||
+            item.brand ||
+            item.Brand,
+          newBrandLogoUrl:
+            item.newBrandLogoUrl ||
+            item.brandLogoUrl ||
+            item['Brand Logo URL'] ||
+            item.newBrand?.logoUrl ||
+            item.newBrand?.logo_url,
+        });
+
+        // ---------------------------------------------------------
+        // 5. Prepare product fields
+        // ---------------------------------------------------------
+        const sku = item.sku
+          ? String(item.sku).trim()
+          : `SKU-IMP-${Date.now()}-${i}`;
+
+        const description = String(
+          item.description || item.Description || ''
+        ).trim();
+
+        // const image = String(
+        //   item.image ||
+        //   item.image_url ||
+        //   item['Image URL'] ||
+        //   ''
+        // ).trim();
+        // Support multiple image URLs while retaining single-image CSV support.
+const imageList = [];
+const seenImages = new Set();
+
+const addImage = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return;
+
+  const url = value.trim();
+
+  if (!seenImages.has(url)) {
+    seenImages.add(url);
+    imageList.push(url);
+  }
+};
+
+// Existing single-image fields remain supported.
+addImage(item.image);
+addImage(item.image_url);
+addImage(item['Image URL']);
+
+// Support the images array sent by the frontend.
+if (Array.isArray(item.images)) {
+  item.images.forEach(addImage);
+}
+
+// Support CSV columns such as Image URL 2, Image URL 3, etc.
+for (const [key, value] of Object.entries(item)) {
+  if (/^image(?:\s*url)?\s*\d+$/i.test(key.trim())) {
+    addImage(value);
+  }
+}
+
+// The first image remains the primary image for existing components.
+const image = imageList[0] || '';
+const imagesJson = JSON.stringify(imageList);
+
+        const rawStatus = String(
+          item.status ?? item.Status ?? 'Active'
+        ).trim().toLowerCase();
+
+        let statusInt;
+
+        if (
+          ['active', '1'].includes(rawStatus)
+        ) {
+          statusInt = 1;
+        } else if (
+          ['inactive', '0'].includes(rawStatus)
+        ) {
+          statusInt = 0;
+        } else {
+          throw new Error(
+            `Status "${rawStatus}" is invalid. Use Active or Inactive.`
+          );
+        }
+
+        const slug =
+          `${slugify(name)}-${Date.now()}-${i}`;
+
+        // ---------------------------------------------------------
+        // 6. Insert product with validated category/subcategory IDs
+        // ---------------------------------------------------------
+        // const insertResult = await client.query(
+        //   `INSERT INTO products (
+        //     category_id,
+        //     sub_category_id,
+        //     name,
+        //     slug,
+        //     sku,
+        //     description,
+        //     brand_id,
+        //     price,
+        //     old_price,
+        //     weight,
+        //     image_url,
+        //     status
+        //   )
+        //   VALUES (
+        //     $1, $2, $3, $4, $5, $6,
+        //     $7, $8, $9, $10, $11, $12
+        //   )
+        //   RETURNING
+        //     id,
+        //     name,
+        //     slug,
+        //     sku,
+        //     category_id AS "categoryId",
+        //     sub_category_id AS "subCategoryId",
+        //     price,
+        //     old_price AS "oldPrice",
+        //     weight,
+        //     brand_id AS "brandId",
+        //     image_url AS "image",
+        //     status`,
+        //   [
+        //     catId,
+        //     subCatId,
+        //     name,
+        //     slug,
+        //     sku,
+        //     description,
+        //     resolvedBrandId,
+        //     price,
+        //     oldPrice,
+        //     weight,
+        //     image,
+        //     statusInt,
+        //   ]
+        // );
+
+        const insertResult = await client.query(
+  `INSERT INTO products (
+    category_id,
+    sub_category_id,
+    name,
+    slug,
+    sku,
+    description,
+    brand_id,
+    price,
+    old_price,
+    weight,
+    image_url,
+    images,
+    status
+  )
+  VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11, $12, $13
+  )
+  RETURNING
+    id,
+    name,
+    slug,
+    sku,
+    category_id AS "categoryId",
+    sub_category_id AS "subCategoryId",
+    price,
+    old_price AS "oldPrice",
+    weight,
+    brand_id AS "brandId",
+    image_url AS "image",
+    images,
+    status`,
+  [
+    catId,
+    subCatId,
+    name,
+    slug,
+    sku,
+    description,
+    resolvedBrandId,
+    price,
+    oldPrice,
+    weight,
+    image,
+    imagesJson,
+    statusInt,
+  ]
+);
+
+        const prod = insertResult.rows[0];
+        prod.images = Array.isArray(prod.images)
+  ? prod.images
+  : typeof prod.images === 'string'
+    ? JSON.parse(prod.images)
+    : prod.image
+      ? [prod.image]
+      : [];
+
+        prod.price = Number(prod.price || 0);
+
+        prod.oldPrice =
+          prod.oldPrice !== null
+            ? Number(prod.oldPrice)
+            : null;
+
+        prod.weight =
+          prod.weight !== null
+            ? Number(prod.weight)
+            : null;
+
+        prod.status =
+          prod.status === 1 ? 'Active' : 'Inactive';
+
+        createdProducts.push(prod);
+      } catch (rowError) {
+        const isDatabaseError = Boolean(rowError.code);
+
+        const wrappedError = new Error(
+          `CSV row ${currentRow.number} (Product: "${currentRow.name}"): ${
+            isDatabaseError
+              ? 'The product could not be saved because one or more values conflict with database rules. Please check the SKU and required fields.'
+              : rowError.message
+          }`
+        );
+
+        if (rowError.code) {
+          wrappedError.code = rowError.code;
+        }
+
+        throw wrappedError;
+      }
+    }
+
+    if (createdProducts.length === 0) {
+      throw new Error(
+        'No products were imported. Please check that your CSV contains valid product names.'
       );
-
-      const prod = resInsert.rows[0];
-
-      prod.price = parseFloat(prod.price || 0);
-      prod.oldPrice = prod.oldPrice
-        ? parseFloat(prod.oldPrice)
-        : null;
-      prod.weight = prod.weight
-        ? parseFloat(prod.weight)
-        : null;
-
-      prod.status =
-        prod.status === 1 ? 'Active' : 'Inactive';
-
-      createdProducts.push(prod);
     }
 
     await client.query('COMMIT');
+    transactionStarted = false;
 
     return res.status(201).json({
       success: true,
       message: `Successfully imported ${createdProducts.length} products.`,
+      count: createdProducts.length,
       products: createdProducts,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client && transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error(
+          'Bulk Import Rollback Error:',
+          rollbackError
+        );
+      }
+    }
 
     console.error('Bulk Import Products Error:', err);
 
-    return res.status(500).json({
+    const message =
+      err.message || 'Failed to bulk import products.';
+
+    // Validation errors and database constraint errors are handled
+    // without returning raw database details to the frontend.
+    const isValidationError =
+      /CSV row \d+|No valid products|No products were imported/i.test(
+        message
+      );
+
+    const isDatabaseConstraintError = [
+      '23502', // not_null_violation
+      '23503', // foreign_key_violation
+      '23505', // unique_violation
+      '23514', // check_violation
+      '22P02', // invalid_text_representation
+    ].includes(err.code);
+
+    const userMessage = isDatabaseConstraintError
+      ? currentRow
+        ? `CSV row ${currentRow.number} (Product: "${currentRow.name}"): The product contains a value that conflicts with the database rules. Please check the category, subcategory, SKU, price, and other required fields.`
+        : 'The import contains a value that conflicts with the database rules. Please check your CSV and try again.'
+      : message;
+
+    return res.status(
+      isValidationError || isDatabaseConstraintError
+        ? 400
+        : 500
+    ).json({
       success: false,
-      message:
-        err.message || 'Failed to bulk import products.',
+      message: userMessage,
     });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 };
+
