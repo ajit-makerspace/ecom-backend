@@ -72,6 +72,41 @@ export async function initDb() {
       );
     `);
 
+    // 4a. user_gst_numbers
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS user_gst_numbers (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        gstin VARCHAR(15) NOT NULL,
+        legal_business_name VARCHAR(255) NOT NULL,
+        trade_name VARCHAR(255),
+        billing_address_id INTEGER REFERENCES user_addresses(id) ON DELETE SET NULL,
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        status SMALLINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_user_gst_number UNIQUE (user_id, gstin),
+        CONSTRAINT chk_user_gstin_format CHECK (
+          gstin ~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$'
+        )
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_user_gst_numbers_user_id ON user_gst_numbers(user_id);');
+
+    // 4b. email_otps (For Passwordless / Email Verification Codes)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS email_otps (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        otp_code VARCHAR(10) NOT NULL,
+        purpose VARCHAR(50) NOT NULL DEFAULT 'login',
+        expires_at TIMESTAMPTZ NOT NULL,
+        is_used BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);');
+
     // 5. modules
     await db.query(`
       CREATE TABLE IF NOT EXISTS modules (
@@ -160,6 +195,8 @@ export async function initDb() {
     await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS is_kit BOOLEAN NOT NULL DEFAULT FALSE;');
     await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS specifications JSONB DEFAULT \'{}\';');
     await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS kit_discount_percentage NUMERIC(5, 2) DEFAULT 0.00;');
+    await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS hsn_code VARCHAR(8);');
+    await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5, 2);');
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);');
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_is_kit ON products(is_kit);');
 
@@ -216,8 +253,20 @@ export async function initDb() {
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS subtotal NUMERIC(10, 2) DEFAULT 0.00;');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_fee NUMERIC(10, 2) DEFAULT 0.00;');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax NUMERIC(10, 2) DEFAULT 0.00;');
-    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT \'Credit Card\';');
     await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS notes TEXT;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS requires_gst_invoice BOOLEAN NOT NULL DEFAULT FALSE;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_gstin VARCHAR(15);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_business_name VARCHAR(255);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_address JSONB;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS place_of_supply_state_code VARCHAR(2);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(50);');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMPTZ;');
+    await db.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date TIMESTAMPTZ;');
+    await db.query("UPDATE orders SET delivery_date = updated_at WHERE LOWER(status) = 'delivered' AND delivery_date IS NULL;");
+    await db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_invoice_number ON orders(invoice_number) WHERE invoice_number IS NOT NULL;');
     await db.query('CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);');
 
     // 10. order_items
@@ -236,6 +285,38 @@ export async function initDb() {
       );
     `);
     await db.query('CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);');
+
+    // 10b. payments
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        provider VARCHAR(30) NOT NULL DEFAULT 'razorpay',
+        provider_order_id VARCHAR(100) UNIQUE,
+        provider_payment_id VARCHAR(100) UNIQUE,
+        amount BIGINT NOT NULL CHECK (amount > 0),
+        currency CHAR(3) NOT NULL DEFAULT 'INR',
+        status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+            CHECK (status IN (
+                'PENDING',
+                'AUTHORIZED',
+                'SUCCESS',
+                'FAILED',
+                'REFUND_PENDING',
+                'PARTIALLY_REFUNDED',
+                'REFUNDED'
+            )),
+        payment_method VARCHAR(50),
+        failure_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT payments_order_provider_unique
+            UNIQUE (order_id, provider, provider_order_id)
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at DESC);');
 
     // 11. user_logs
     await db.query(`
@@ -292,6 +373,56 @@ export async function initDb() {
       );
     `);
     await db.query('CREATE INDEX IF NOT EXISTS idx_brand_showcases_status_sort ON brand_showcases(status, sort_order);');
+
+    // 14. wishlists & wishlist_items
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS wishlists (
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        user_id UUID NOT NULL,
+        status SMALLINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_wishlists_user_id ON wishlists(user_id);');
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS wishlist_items (
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        wishlist_id INTEGER NOT NULL REFERENCES wishlists(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        product_variant_id INTEGER,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_wishlist_items_wishlist_id ON wishlist_items(wishlist_id);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_wishlist_items_product_id ON wishlist_items(product_id);');
+
+    // 15. carts & cart_items
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS carts (
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        users_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        session_id VARCHAR(100),
+        status SMALLINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_carts_users_id ON carts(users_id);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_carts_session_id ON carts(session_id);');
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        cart_id INTEGER NOT NULL REFERENCES carts(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_cart_items_cart_product UNIQUE (cart_id, product_id)
+      );
+    `);
 
     // ==========================================
     // SEEDING DATA
@@ -589,7 +720,7 @@ export async function initDb() {
              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
            ) RETURNING id;`,
           [
-            'MS-948120',
+            'MSM26271001',
             sampleUserId,
             'Alex Maker',
             'customer@makerspace.com',

@@ -10,11 +10,89 @@ const slugify = (text) => {
     .replace(/^-+|-+$/g, '');
 };
 
-// 1. Get All Products (Raw SQL JOIN with categories and subcategories, excluding status = 2)
+// Resolve an existing brand ID or create/reuse a brand by name.
+const resolveBrandId = async (
+  queryable,
+  { brandId, newBrandName, newBrandLogoUrl }
+) => {
+ if (brandId !== undefined && brandId !== null && brandId !== '') {
+  const parsedBrandId = parseInt(brandId, 10);
+
+  if (!Number.isInteger(parsedBrandId) || parsedBrandId <= 0) {
+    throw new Error(`Invalid brand ID: ${brandId}`);
+  }
+
+  const { rows } = await queryable.query(
+    `SELECT id
+     FROM brand_logos
+     WHERE id = $1
+       AND status != 2`,
+    [parsedBrandId]
+  );
+
+  if (rows.length === 0) {
+    throw new Error(
+      `Brand ID ${parsedBrandId} does not exist or has been deleted.`
+    );
+  }
+
+  return parsedBrandId;
+}
+
+  const cleanBrandName = String(newBrandName || '').trim();
+
+  // No brand selected or provided.
+  if (!cleanBrandName) {
+    return null;
+  }
+
+  // Reuse an existing brand with the same name.
+  const existingBrand = await queryable.query(
+    `SELECT id
+     FROM public.brand_logos
+     WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+     ORDER BY id
+     LIMIT 1`,
+    [cleanBrandName]
+  );
+
+  if (existingBrand.rows.length > 0) {
+    return existingBrand.rows[0].id;
+  }
+
+  // Create a new brand when a new name is supplied.
+  const logoUrl =
+    String(newBrandLogoUrl || '').trim() ||
+    '/PromoCards/def-icon.png';
+
+  const createdBrand = await queryable.query(
+    `INSERT INTO public.brand_logos (
+      name,
+      logo_url,
+      sort_order,
+      status
+    )
+    VALUES (
+      $1,
+      $2,
+      COALESCE(
+        (SELECT MAX(sort_order) + 1 FROM public.brand_logos),
+        0
+      ),
+      1
+    )
+    RETURNING id`,
+    [cleanBrandName, logoUrl]
+  );
+
+  return createdBrand.rows[0].id;
+};
+
+// 1. Get All Products
 export const getProducts = async (req, res) => {
   try {
     const { rows } = await db.query(`
-      SELECT 
+      SELECT
         p.id,
         c.module_id AS "moduleId",
         m.name AS "moduleName",
@@ -26,7 +104,9 @@ export const getProducts = async (req, res) => {
         p.slug,
         p.sku,
         p.description,
-        p.brand,
+       p.brand_id AS "brandId",
+bl.name AS brand,
+bl.logo_url AS "brandLogoUrl",
         p.price,
         p.old_price AS "oldPrice",
         p.weight,
@@ -35,6 +115,7 @@ export const getProducts = async (req, res) => {
         p.is_kit AS "isKit",
         p.specifications,
         p.kit_discount_percentage AS "kitDiscountPercentage",
+
         (
           SELECT json_agg(
             json_build_object(
@@ -43,13 +124,20 @@ export const getProducts = async (req, res) => {
               'name', cp.name,
               'sku', cp.sku,
               'price', cp.price::numeric
-            ) ORDER BY ki.sort_order ASC
+            )
+            ORDER BY ki.sort_order ASC
           )
           FROM kit_items ki
           JOIN products cp ON ki.product_id = cp.id
           WHERE ki.kit_id = p.id
         ) AS "kitItems",
-        (SELECT COUNT(*)::int FROM kit_items ki WHERE ki.kit_id = p.id) AS "componentsCount",
+
+        (
+          SELECT COUNT(*)::int
+          FROM kit_items ki
+          WHERE ki.kit_id = p.id
+        ) AS "componentsCount",
+
         p.sort_order AS "sortOrder",
         p.meta_title AS "metaTitle",
         p.meta_description AS "metaDescription",
@@ -58,10 +146,21 @@ export const getProducts = async (req, res) => {
         p.status,
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt"
+
       FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id AND c.status != 2
-      LEFT JOIN modules m ON c.module_id = m.id AND m.status != 2
-      LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status != 2
+      LEFT JOIN categories c
+        ON p.category_id = c.id
+        AND c.status != 2
+      LEFT JOIN modules m
+        ON c.module_id = m.id
+        AND m.status != 2
+      LEFT JOIN subcategories sc
+        ON p.sub_category_id = sc.id
+        AND sc.status != 2
+        LEFT JOIN brand_logos bl
+  ON p.brand_id = bl.id
+  AND bl.status != 2
+
       WHERE p.status != 2
       ORDER BY p.id DESC
     `);
@@ -69,11 +168,25 @@ export const getProducts = async (req, res) => {
     const products = rows.map((prod) => ({
       ...prod,
       price: parseFloat(prod.price || 0),
-      oldPrice: prod.oldPrice ? parseFloat(prod.oldPrice) : null,
-      weight: prod.weight ? parseFloat(prod.weight) : null,
+      oldPrice: prod.oldPrice
+        ? parseFloat(prod.oldPrice)
+        : null,
+      weight: prod.weight
+        ? parseFloat(prod.weight)
+        : null,
       status: prod.status === 1 ? 'Active' : 'Inactive',
-      specifications: typeof prod.specifications === 'object' && prod.specifications !== null ? prod.specifications : {},
-      images: Array.isArray(prod.images) ? prod.images : (typeof prod.images === 'string' ? JSON.parse(prod.images) : (prod.image ? [prod.image] : [])),
+      specifications:
+        typeof prod.specifications === 'object' &&
+        prod.specifications !== null
+          ? prod.specifications
+          : {},
+      images: Array.isArray(prod.images)
+        ? prod.images
+        : typeof prod.images === 'string'
+          ? JSON.parse(prod.images)
+          : prod.image
+            ? [prod.image]
+            : [],
       kitItems: prod.kitItems || [],
     }));
 
@@ -84,11 +197,15 @@ export const getProducts = async (req, res) => {
     });
   } catch (err) {
     console.error('Get Products Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch products.' });
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch products.',
+    });
   }
 };
 
-// 2. Create Product (Raw SQL Insert)
+// 2. Create Product
 export const createProduct = async (req, res) => {
   try {
     const {
@@ -99,7 +216,10 @@ export const createProduct = async (req, res) => {
       price,
       oldPrice,
       weight,
-      brand,
+      brandId,
+      newBrandName,
+      newBrandLogoUrl,
+      newBrand,
       description,
       hasVariants,
       isFeatured,
@@ -125,54 +245,158 @@ export const createProduct = async (req, res) => {
     }
 
     const catId = parseInt(categoryId, 10);
-    const subCatId = subCategoryId ? parseInt(subCategoryId, 10) : null;
+    const subCatId = subCategoryId
+      ? parseInt(subCategoryId, 10)
+      : null;
+
     const cleanName = String(name).trim();
-    const generatedSlug = `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
+
+    const generatedSlug =
+      `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
 
     let cleanSku = sku ? String(sku).trim() : '';
+
     if (!cleanSku) {
-      const catRes = await db.query('SELECT code FROM categories WHERE id = $1', [catId]);
-      const subCatRes = subCatId ? await db.query('SELECT code FROM subcategories WHERE id = $1', [subCatId]) : { rows: [] };
-      const catCode = catRes.rows[0]?.code || String(1000 + catId);
-      const subCatCode = subCatRes.rows[0]?.code || (subCatId ? String(2000 + subCatId) : '0000');
+      const catRes = await db.query(
+        'SELECT code FROM categories WHERE id = $1',
+        [catId]
+      );
+
+      const subCatRes = subCatId
+        ? await db.query(
+            'SELECT code FROM subcategories WHERE id = $1',
+            [subCatId]
+          )
+        : { rows: [] };
+
+      const catCode =
+        catRes.rows[0]?.code || String(1000 + catId);
+
+      const subCatCode =
+        subCatRes.rows[0]?.code ||
+        (subCatId ? String(2000 + subCatId) : '0000');
+
       cleanSku = generateSku(catCode, subCatCode, cleanName);
     }
 
-    const numPrice = parseFloat(price) || 0.00;
-    const numOldPrice = oldPrice ? parseFloat(oldPrice) : null;
-    const numWeight = weight ? parseFloat(weight) : null;
+    const numPrice = parseFloat(price) || 0.0;
+    const numOldPrice = oldPrice
+      ? parseFloat(oldPrice)
+      : null;
+    const numWeight = weight
+      ? parseFloat(weight)
+      : null;
 
     const boolHasVariants = Boolean(hasVariants);
     const boolIsFeatured = Boolean(isFeatured);
-    const boolIsKit = Boolean(isKit !== undefined ? isKit : is_kit);
-    const specsJson = typeof specifications === 'object' && specifications !== null ? JSON.stringify(specifications) : (typeof specifications === 'string' ? specifications : '{}');
-    const numKitDiscount = parseFloat(kitDiscountPercentage || 0) || 0.00;
+
+    const boolIsKit = Boolean(
+      isKit !== undefined ? isKit : is_kit
+    );
+
+    const specsJson =
+      typeof specifications === 'object' &&
+      specifications !== null
+        ? JSON.stringify(specifications)
+        : typeof specifications === 'string'
+          ? specifications
+          : '{}';
+
+    const numKitDiscount =
+      parseFloat(kitDiscountPercentage || 0) || 0.0;
+
     const numSortOrder = parseInt(sortOrder || '0', 10);
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 0;
+    const statusInt =
+      String(status || 'Active').toLowerCase() === 'active' ||
+      status === 1
+        ? 1
+        : 0;
 
     let imageList = [];
+
     if (Array.isArray(images) && images.length > 0) {
-      imageList = images.filter((img) => typeof img === 'string' && img.trim());
-    } else if (image && typeof image === 'string' && image.trim()) {
+      imageList = images.filter(
+        (img) => typeof img === 'string' && img.trim()
+      );
+    } else if (
+      image &&
+      typeof image === 'string' &&
+      image.trim()
+    ) {
       imageList = [image.trim()];
     }
-    const primaryImage = imageList[0] || (typeof image === 'string' ? image.trim() : '');
+
+    const primaryImage =
+      imageList[0] ||
+      (typeof image === 'string' ? image.trim() : '');
+
     const imagesJson = JSON.stringify(imageList);
+
+    // Brand is stored as brand_id, not as a brand name.
+    const resolvedBrandId = await resolveBrandId(db, {
+      brandId,
+      newBrandName: newBrandName || newBrand?.name,
+      newBrandLogoUrl:
+        newBrandLogoUrl ||
+        newBrand?.logoUrl ||
+        newBrand?.logo_url,
+    });
 
     const { rows } = await db.query(
       `INSERT INTO products (
-        category_id, sub_category_id, name, slug, sku, description, brand,
-        price, old_price, weight, has_variants, is_featured, is_kit, specifications,
-        kit_discount_percentage, sort_order, meta_title, meta_description, image_url, images, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-      RETURNING 
-        id, category_id AS "categoryId", sub_category_id AS "subCategoryId",
-        name, slug, sku, description, brand, price, old_price AS "oldPrice",
-        weight, has_variants AS "hasVariants", is_featured AS "isFeatured",
-        is_kit AS "isKit", specifications, kit_discount_percentage AS "kitDiscountPercentage",
-        sort_order AS "sortOrder", meta_title AS "metaTitle", meta_description AS "metaDescription",
-        image_url AS "image", images, status, created_at AS "createdAt", updated_at AS "updatedAt"`,
+        category_id,
+        sub_category_id,
+        name,
+        slug,
+        sku,
+        description,
+        brand_id,
+        price,
+        old_price,
+        weight,
+        has_variants,
+        is_featured,
+        is_kit,
+        specifications,
+        kit_discount_percentage,
+        sort_order,
+        meta_title,
+        meta_description,
+        image_url,
+        images,
+        status
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18, $19, $20, $21
+      )
+      RETURNING
+        id,
+        category_id AS "categoryId",
+        sub_category_id AS "subCategoryId",
+        name,
+        slug,
+        sku,
+        description,
+        brand_id AS "brandId",
+        price,
+        old_price AS "oldPrice",
+        weight,
+        has_variants AS "hasVariants",
+        is_featured AS "isFeatured",
+        is_kit AS "isKit",
+        specifications,
+        kit_discount_percentage AS "kitDiscountPercentage",
+        sort_order AS "sortOrder",
+        meta_title AS "metaTitle",
+        meta_description AS "metaDescription",
+        image_url AS "image",
+        images,
+        status,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"`,
       [
         catId,
         subCatId,
@@ -180,7 +404,7 @@ export const createProduct = async (req, res) => {
         generatedSlug,
         cleanSku,
         description || '',
-        brand || '',
+        resolvedBrandId,
         numPrice,
         numOldPrice,
         numWeight,
@@ -200,34 +424,78 @@ export const createProduct = async (req, res) => {
 
     const created = rows[0];
 
-    // If product is a Kit, save constituent kit items
+    // If product is a kit, save its constituent items.
     const itemsToInsert = kit_items || kitItems || [];
-    if (boolIsKit && Array.isArray(itemsToInsert) && itemsToInsert.length > 0) {
-      let sortOrder = 0;
+
+    if (
+      boolIsKit &&
+      Array.isArray(itemsToInsert) &&
+      itemsToInsert.length > 0
+    ) {
+      let itemSortOrder = 0;
+
       for (const item of itemsToInsert) {
         const compId = item.productId || item.id;
         const qty = parseInt(item.quantity || 1, 10);
+
         if (compId && qty > 0) {
           await db.query(
-            `INSERT INTO kit_items (kit_id, product_id, quantity, sort_order)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (kit_id, product_id) DO UPDATE SET quantity = EXCLUDED.quantity`,
-            [created.id, compId, qty, sortOrder++]
+            `INSERT INTO kit_items (
+              kit_id,
+              product_id,
+              quantity,
+              sort_order
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (kit_id, product_id)
+            DO UPDATE SET quantity = EXCLUDED.quantity`,
+            [
+              created.id,
+              compId,
+              qty,
+              itemSortOrder++,
+            ]
           );
         }
       }
     }
 
-    const catRes = await db.query('SELECT name FROM categories WHERE id = $1', [catId]);
-    const subCatRes = subCatId ? await db.query('SELECT name FROM subcategories WHERE id = $1', [subCatId]) : { rows: [] };
+    const catRes = await db.query(
+      'SELECT name FROM categories WHERE id = $1',
+      [catId]
+    );
 
-    created.categoryName = catRes.rows[0]?.name || 'General';
-    created.subCategoryName = subCatRes.rows[0]?.name || '';
+    const subCatRes = subCatId
+      ? await db.query(
+          'SELECT name FROM subcategories WHERE id = $1',
+          [subCatId]
+        )
+      : { rows: [] };
+
+    created.categoryName =
+      catRes.rows[0]?.name || 'General';
+
+    created.subCategoryName =
+      subCatRes.rows[0]?.name || '';
+
     created.price = parseFloat(created.price || 0);
-    created.oldPrice = created.oldPrice ? parseFloat(created.oldPrice) : null;
-    created.weight = created.weight ? parseFloat(created.weight) : null;
-    created.status = created.status === 1 ? 'Active' : 'Inactive';
-    created.specifications = typeof created.specifications === 'object' && created.specifications !== null ? created.specifications : {};
+
+    created.oldPrice = created.oldPrice
+      ? parseFloat(created.oldPrice)
+      : null;
+
+    created.weight = created.weight
+      ? parseFloat(created.weight)
+      : null;
+
+    created.status =
+      created.status === 1 ? 'Active' : 'Inactive';
+
+    created.specifications =
+      typeof created.specifications === 'object' &&
+      created.specifications !== null
+        ? created.specifications
+        : {};
 
     return res.status(201).json({
       success: true,
@@ -236,14 +504,19 @@ export const createProduct = async (req, res) => {
     });
   } catch (err) {
     console.error('Create Product Error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Failed to create product.' });
+
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to create product.',
+    });
   }
 };
 
-// 3. Update Product (Raw SQL Update)
+// 3. Update Product
 export const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
+
     const {
       name,
       categoryId,
@@ -252,7 +525,10 @@ export const updateProduct = async (req, res) => {
       price,
       oldPrice,
       weight,
-      brand,
+      brandId,
+      newBrandName,
+      newBrandLogoUrl,
+      newBrand,
       description,
       hasVariants,
       isFeatured,
@@ -271,34 +547,85 @@ export const updateProduct = async (req, res) => {
     } = req.body;
 
     const cleanName = String(name || '').trim();
-    const catId = parseInt(categoryId, 10);
-    const subCatId = subCategoryId ? parseInt(subCategoryId, 10) : null;
 
-    const numPrice = parseFloat(price) || 0.00;
-    const numOldPrice = oldPrice ? parseFloat(oldPrice) : null;
-    const numWeight = weight ? parseFloat(weight) : null;
+    const catId = parseInt(categoryId, 10);
+
+    const subCatId = subCategoryId
+      ? parseInt(subCategoryId, 10)
+      : null;
+
+    const numPrice = parseFloat(price) || 0.0;
+
+    const numOldPrice = oldPrice
+      ? parseFloat(oldPrice)
+      : null;
+
+    const numWeight = weight
+      ? parseFloat(weight)
+      : null;
 
     const boolHasVariants = Boolean(hasVariants);
     const boolIsFeatured = Boolean(isFeatured);
-    const boolIsKit = isKit !== undefined ? Boolean(isKit) : (is_kit !== undefined ? Boolean(is_kit) : false);
-    const specsJson = typeof specifications === 'object' && specifications !== null ? JSON.stringify(specifications) : (typeof specifications === 'string' ? specifications : '{}');
-    const numKitDiscount = parseFloat(kitDiscountPercentage || 0) || 0.00;
+
+    const boolIsKit =
+      isKit !== undefined
+        ? Boolean(isKit)
+        : is_kit !== undefined
+          ? Boolean(is_kit)
+          : false;
+
+    const specsJson =
+      typeof specifications === 'object' &&
+      specifications !== null
+        ? JSON.stringify(specifications)
+        : typeof specifications === 'string'
+          ? specifications
+          : '{}';
+
+    const numKitDiscount =
+      parseFloat(kitDiscountPercentage || 0) || 0.0;
+
     const numSortOrder = parseInt(sortOrder || '0', 10);
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' || status === 1 ? 1 : 0;
+    const statusInt =
+      String(status || 'Active').toLowerCase() === 'active' ||
+      status === 1
+        ? 1
+        : 0;
 
     let imageList = [];
+
     if (Array.isArray(images) && images.length > 0) {
-      imageList = images.filter((img) => typeof img === 'string' && img.trim());
-    } else if (image && typeof image === 'string' && image.trim()) {
+      imageList = images.filter(
+        (img) => typeof img === 'string' && img.trim()
+      );
+    } else if (
+      image &&
+      typeof image === 'string' &&
+      image.trim()
+    ) {
       imageList = [image.trim()];
     }
-    const primaryImage = imageList[0] || (typeof image === 'string' ? image.trim() : '');
+
+    const primaryImage =
+      imageList[0] ||
+      (typeof image === 'string' ? image.trim() : '');
+
     const imagesJson = JSON.stringify(imageList);
+
+    // Brand is updated using brand_id.
+    const resolvedBrandId = await resolveBrandId(db, {
+      brandId,
+      newBrandName: newBrandName || newBrand?.name,
+      newBrandLogoUrl:
+        newBrandLogoUrl ||
+        newBrand?.logoUrl ||
+        newBrand?.logo_url,
+    });
 
     const { rows } = await db.query(
       `UPDATE products
-       SET 
+       SET
          name = $1,
          category_id = $2,
          sub_category_id = $3,
@@ -306,7 +633,7 @@ export const updateProduct = async (req, res) => {
          price = $5,
          old_price = $6,
          weight = $7,
-         brand = $8,
+         brand_id = $8,
          description = $9,
          has_variants = $10,
          is_featured = $11,
@@ -321,13 +648,31 @@ export const updateProduct = async (req, res) => {
          status = $20,
          updated_at = NOW()
        WHERE id = $21
-       RETURNING 
-         id, category_id AS "categoryId", sub_category_id AS "subCategoryId",
-         name, slug, sku, description, brand, price, old_price AS "oldPrice",
-         weight, has_variants AS "hasVariants", is_featured AS "isFeatured",
-         is_kit AS "isKit", specifications, kit_discount_percentage AS "kitDiscountPercentage",
-         sort_order AS "sortOrder", meta_title AS "metaTitle", meta_description AS "metaDescription",
-         image_url AS "image", images, status, created_at AS "createdAt", updated_at AS "updatedAt"`,
+       RETURNING
+         id,
+         category_id AS "categoryId",
+         sub_category_id AS "subCategoryId",
+         name,
+         slug,
+         sku,
+         description,
+         brand_id AS "brandId",
+         price,
+         old_price AS "oldPrice",
+         weight,
+         has_variants AS "hasVariants",
+         is_featured AS "isFeatured",
+         is_kit AS "isKit",
+         specifications,
+         kit_discount_percentage AS "kitDiscountPercentage",
+         sort_order AS "sortOrder",
+         meta_title AS "metaTitle",
+         meta_description AS "metaDescription",
+         image_url AS "image",
+         images,
+         status,
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"`,
       [
         cleanName,
         catId,
@@ -336,7 +681,7 @@ export const updateProduct = async (req, res) => {
         numPrice,
         numOldPrice,
         numWeight,
-        brand || '',
+        resolvedBrandId,
         description || '',
         boolHasVariants,
         boolIsFeatured,
@@ -354,23 +699,44 @@ export const updateProduct = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Product not found.' });
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found.',
+      });
     }
 
-    // If kit items are provided, update kit_items table
+    // Update kit items if supplied.
     const itemsToUpdate = kit_items || kitItems;
+
     if (Array.isArray(itemsToUpdate)) {
-      await db.query('DELETE FROM kit_items WHERE kit_id = $1', [id]);
-      let sortOrder = 0;
+      await db.query(
+        'DELETE FROM kit_items WHERE kit_id = $1',
+        [id]
+      );
+
+      let itemSortOrder = 0;
+
       for (const item of itemsToUpdate) {
         const compId = item.productId || item.id;
         const qty = parseInt(item.quantity || 1, 10);
+
         if (compId && qty > 0) {
           await db.query(
-            `INSERT INTO kit_items (kit_id, product_id, quantity, sort_order)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (kit_id, product_id) DO UPDATE SET quantity = EXCLUDED.quantity`,
-            [id, compId, qty, sortOrder++]
+            `INSERT INTO kit_items (
+              kit_id,
+              product_id,
+              quantity,
+              sort_order
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (kit_id, product_id)
+            DO UPDATE SET quantity = EXCLUDED.quantity`,
+            [
+              id,
+              compId,
+              qty,
+              itemSortOrder++,
+            ]
           );
         }
       }
@@ -378,15 +744,36 @@ export const updateProduct = async (req, res) => {
 
     const updated = rows[0];
 
-    const catRes = await db.query('SELECT name FROM categories WHERE id = $1', [catId]);
-    const subCatRes = subCatId ? await db.query('SELECT name FROM subcategories WHERE id = $1', [subCatId]) : { rows: [] };
+    const catRes = await db.query(
+      'SELECT name FROM categories WHERE id = $1',
+      [catId]
+    );
 
-    updated.categoryName = catRes.rows[0]?.name || 'General';
-    updated.subCategoryName = subCatRes.rows[0]?.name || '';
+    const subCatRes = subCatId
+      ? await db.query(
+          'SELECT name FROM subcategories WHERE id = $1',
+          [subCatId]
+        )
+      : { rows: [] };
+
+    updated.categoryName =
+      catRes.rows[0]?.name || 'General';
+
+    updated.subCategoryName =
+      subCatRes.rows[0]?.name || '';
+
     updated.price = parseFloat(updated.price || 0);
-    updated.oldPrice = updated.oldPrice ? parseFloat(updated.oldPrice) : null;
-    updated.weight = updated.weight ? parseFloat(updated.weight) : null;
-    updated.status = updated.status === 1 ? 'Active' : 'Inactive';
+
+    updated.oldPrice = updated.oldPrice
+      ? parseFloat(updated.oldPrice)
+      : null;
+
+    updated.weight = updated.weight
+      ? parseFloat(updated.weight)
+      : null;
+
+    updated.status =
+      updated.status === 1 ? 'Active' : 'Inactive';
 
     return res.json({
       success: true,
@@ -395,21 +782,32 @@ export const updateProduct = async (req, res) => {
     });
   } catch (err) {
     console.error('Update Product Error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Failed to update product.' });
+
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to update product.',
+    });
   }
 };
 
-// 4. Delete Product (Soft Delete: status = 2)
+// 4. Delete Product (Soft Delete)
 export const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
+
     const { rows } = await db.query(
-      'UPDATE products SET status = 2, updated_at = NOW() WHERE id = $1 RETURNING id',
+      `UPDATE products
+       SET status = 2, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id`,
       [id]
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Product not found.' });
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found.',
+      });
     }
 
     return res.json({
@@ -418,52 +816,162 @@ export const deleteProduct = async (req, res) => {
     });
   } catch (err) {
     console.error('Delete Product Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to delete product.' });
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete product.',
+    });
   }
 };
 
-// 5. Bulk Import Products (Transactional SQL)
+// 5. Bulk Import Products
+
 export const bulkImportProducts = async (req, res) => {
   const client = await db.pool.connect();
+
   try {
     const { products } = req.body;
+
     if (!Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({ success: false, message: 'No valid products provided for import.' });
+      return res.status(400).json({
+        success: false,
+        message: 'No valid products provided for import.',
+      });
     }
 
     await client.query('BEGIN');
 
     const createdProducts = [];
+
     for (let i = 0; i < products.length; i++) {
       const item = products[i];
-      const name = String(item.name || item['Product Name'] || '').trim();
-      const catId = item.categoryId ? parseInt(item.categoryId, 10) : 1;
-      const subCatId = item.subCategoryId ? parseInt(item.subCategoryId, 10) : null;
-      const price = parseFloat(item.price || item['Price']) || 0.00;
-      const oldPrice = item.oldPrice ? parseFloat(item.oldPrice) : null;
-      const weight = item.weight ? parseFloat(item.weight) : null;
-      const brand = String(item.brand || item['Brand'] || '').trim();
-      const sku = item.sku ? String(item.sku).trim() : `SKU-IMP-${Date.now().toString().slice(-4)}-${i}`;
-      const description = String(item.description || '').trim();
-      const image = String(item.image || item.image_url || '').trim();
-      const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 2;
+
+      const name = String(
+        item.name || item['Product Name'] || ''
+      ).trim();
 
       if (!name) continue;
 
-      const slug = `${slugify(name)}-${Date.now().toString().slice(-4)}-${i}`;
+      const catId = item.categoryId
+        ? parseInt(item.categoryId, 10)
+        : 1;
+
+      const subCatId = item.subCategoryId
+        ? parseInt(item.subCategoryId, 10)
+        : null;
+
+      const price =
+        parseFloat(item.price ?? item['Price']) || 0;
+
+      const oldPrice =
+        item.oldPrice || item['Old Price']
+          ? parseFloat(item.oldPrice ?? item['Old Price'])
+          : null;
+
+      const weight = item.weight
+        ? parseFloat(item.weight)
+        : null;
+
+      // Resolve the brand to brand_logos.id.
+      // A CSV brand name is reused or created by resolveBrandId.
+      const resolvedBrandId = await resolveBrandId(client, {
+        brandId: item.brandId ?? item.brand_id,
+        newBrandName:
+          item.newBrandName ||
+          item.newBrand?.name ||
+          item.brand ||
+          item.Brand,
+        newBrandLogoUrl:
+          item.newBrandLogoUrl ||
+          item.newBrand?.logoUrl ||
+          item.newBrand?.logo_url,
+      });
+
+      const sku = item.sku
+        ? String(item.sku).trim()
+        : `SKU-IMP-${Date.now().toString().slice(-4)}-${i}`;
+
+      const description = String(
+        item.description || item.Description || ''
+      ).trim();
+
+      const image = String(
+        item.image ||
+        item.image_url ||
+        item['Image URL'] ||
+        ''
+      ).trim();
+
+      const statusInt =
+        String(item.status || item.Status || 'Active')
+          .toLowerCase() === 'active'
+          ? 1
+          : 2;
+
+      const slug =
+        `${slugify(name)}-${Date.now().toString().slice(-4)}-${i}`;
 
       const resInsert = await client.query(
         `INSERT INTO products (
-          category_id, sub_category_id, name, slug, sku, description, brand,
-          price, old_price, weight, image_url, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        RETURNING id, name, slug, sku, category_id AS "categoryId", price, brand, image_url AS "image", status`,
-        [catId, subCatId, name, slug, sku, description, brand, price, oldPrice, weight, image, statusInt]
+          category_id,
+          sub_category_id,
+          name,
+          slug,
+          sku,
+          description,
+          brand_id,
+          price,
+          old_price,
+          weight,
+          image_url,
+          status
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, $8, $9, $10, $11, $12
+        )
+        RETURNING
+          id,
+          name,
+          slug,
+          sku,
+          category_id AS "categoryId",
+          sub_category_id AS "subCategoryId",
+          price,
+          old_price AS "oldPrice",
+          weight,
+          brand_id AS "brandId",
+          image_url AS "image",
+          status`,
+        [
+          catId,
+          subCatId,
+          name,
+          slug,
+          sku,
+          description,
+          resolvedBrandId,
+          price,
+          oldPrice,
+          weight,
+          image,
+          statusInt,
+        ]
       );
 
       const prod = resInsert.rows[0];
+
       prod.price = parseFloat(prod.price || 0);
-      prod.status = prod.status === 1 ? 'Active' : 'Inactive';
+      prod.oldPrice = prod.oldPrice
+        ? parseFloat(prod.oldPrice)
+        : null;
+      prod.weight = prod.weight
+        ? parseFloat(prod.weight)
+        : null;
+
+      prod.status =
+        prod.status === 1 ? 'Active' : 'Inactive';
+
       createdProducts.push(prod);
     }
 
@@ -476,8 +984,14 @@ export const bulkImportProducts = async (req, res) => {
     });
   } catch (err) {
     await client.query('ROLLBACK');
+
     console.error('Bulk Import Products Error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Failed to bulk import products.' });
+
+    return res.status(500).json({
+      success: false,
+      message:
+        err.message || 'Failed to bulk import products.',
+    });
   } finally {
     client.release();
   }

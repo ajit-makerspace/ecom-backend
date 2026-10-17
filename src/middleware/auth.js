@@ -26,11 +26,33 @@ export async function authenticateToken(req, res, next) {
         return res.status(401).json({ success: false, message: 'Invalid or inactive admin session.' });
       }
 
-      const user = rows[0];
+      const adminUser = rows[0];
+
+      // Ensure a matching customer record in `users` exists for cart/wishlist/orders foreign key compatibility
+      let customerId = adminUser.id;
+      let { rows: userRows } = await db.query(
+        'SELECT id, email, first_name, last_name, phone, role, status FROM users WHERE LOWER(email) = LOWER($1)',
+        [adminUser.email]
+      );
+      if (userRows.length === 0) {
+        const insertUser = await db.query(
+          `INSERT INTO users (email, password_hash, first_name, last_name, phone, status, role, created_at, updated_at)
+           VALUES ($1, 'LINKED_ADMIN', $2, $3, $4, 1, 'Customer', NOW(), NOW())
+           RETURNING id, email, first_name, last_name, phone, role, status`,
+          [adminUser.email, adminUser.first_name || 'Admin', adminUser.last_name || 'User', '']
+        );
+        userRows = insertUser.rows;
+      }
+      if (userRows.length > 0) {
+        customerId = userRows[0].id;
+      }
+
       req.user = {
-        ...user,
-        roleName: USER_TYPES[user.user_type] || 'SUPER_ADMIN',
-        permissions: ROLE_PERMISSIONS[user.user_type] || ['all'],
+        ...adminUser,
+        id: customerId, // valid users.id for user tables (carts, wishlists, orders)
+        adminId: adminUser.id,
+        roleName: USER_TYPES[adminUser.user_type] || 'SUPER_ADMIN',
+        permissions: ROLE_PERMISSIONS[adminUser.user_type] || ['all'],
       };
       return next();
     }
@@ -58,7 +80,7 @@ export async function authenticateToken(req, res, next) {
   }
 }
 
-// Optional Auth (e.g. for Storefront Checkout: logs order against user if token valid, else guest)
+// Optional Auth (e.g. for Storefront Checkout, Cart & Wishlist: logs order against user if token valid, else guest)
 export async function optionalAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -70,6 +92,42 @@ export async function optionalAuth(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Case A: Admin User visiting storefront endpoints
+    if (decoded.role === 'SUPER_ADMIN' || decoded.user_type === 1) {
+      const { rows: adminRows } = await db.query(
+        'SELECT id, email, first_name, last_name, phone, user_type, status FROM admin_users WHERE id = $1',
+        [decoded.id]
+      );
+      if (adminRows.length > 0 && adminRows[0].status === 1) {
+        const adminUser = adminRows[0];
+        let { rows: userRows } = await db.query(
+          'SELECT id, email, first_name, last_name, phone, role, status FROM users WHERE LOWER(email) = LOWER($1)',
+          [adminUser.email]
+        );
+        if (userRows.length === 0) {
+          const insertUser = await db.query(
+            `INSERT INTO users (email, password_hash, first_name, last_name, phone, status, role, created_at, updated_at)
+             VALUES ($1, 'LINKED_ADMIN', $2, $3, $4, 1, 'Customer', NOW(), NOW())
+             RETURNING id, email, first_name, last_name, phone, role, status`,
+            [adminUser.email, adminUser.first_name || 'Admin', adminUser.last_name || 'User', adminUser.phone || '']
+          );
+          userRows = insertUser.rows;
+        }
+        if (userRows.length > 0) {
+          req.user = {
+            ...userRows[0],
+            adminId: adminUser.id,
+            user_type: 2,
+            roleName: 'CUSTOMER',
+            isAdmin: true,
+          };
+          return next();
+        }
+      }
+    }
+
+    // Case B: Standard Customer lookup
     const { rows } = await db.query(
       'SELECT id, email, first_name, last_name, phone, role, status FROM users WHERE id = $1',
       [decoded.id]

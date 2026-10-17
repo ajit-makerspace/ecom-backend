@@ -15,13 +15,24 @@ import customerRoutes from './routes/admin/customerRoutes.js';
 import bannerRoutes from './routes/admin/bannerRoutes.js';
 import showcaseRoutes from './routes/admin/showcaseRoutes.js';
 import kitShowcaseRoutes from "./routes/admin/kitShowcaseRoutes.js"
+import chatbotRoutes from './routes/admin/chatbotRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import brandLogoRoutes from './routes/admin/brandLogoRoutes.js';
+import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
 import userOrderRoutes from './routes/user/userOrderRoutes.js';
 import userProfileRoutes from './routes/user/userProfileRoutes.js';
 import userCartRoutes from './routes/user/userCartRoutes.js';
+import userWishlistRoutes from './routes/user/userWishlistRoutes.js';
+import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
+import userModuleRoutes from "./routes/user/userModuleRoutes.js";
+import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
+import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
+import { ensureReviewsTable } from './controllers/user/userReviewController.js';
+import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
+import userCompetitionRoute from "./routes/user/userCompetitionRoute.js"
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -33,6 +44,8 @@ const PORT = process.env.PORT || 3005;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
 
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
 
@@ -84,10 +97,14 @@ app.get('/api/media/:id', async (req, res) => {
   }
 });
 
-// Database Upload Resolver: streams any /uploads/:folder/:filename directly from PostgreSQL product_images & media_files
-app.get(['/uploads/:folder/:filename', '/uploads/:filename'], async (req, res, next) => {
+// Serve static uploads directly from backend uploads folder (including nested products/robu, brands, banners, etc.)
+app.use('/uploads', express.static(UPLOADS_DIR));
+
+// Database Upload Resolver: streams any /uploads/* from PostgreSQL product_images & media_files if not found on disk
+app.get('/uploads/*', async (req, res, next) => {
   try {
-    const filename = req.params.filename || req.params.folder;
+    const rawPath = req.params[0] || '';
+    const filename = path.basename(rawPath);
     if (!filename) return next();
 
     // 1. Check PostgreSQL product_images table first
@@ -114,13 +131,7 @@ app.get(['/uploads/:folder/:filename', '/uploads/:filename'], async (req, res, n
       return res.end(rows[0].data);
     }
 
-    // 3. Fallback to physical disk if any legacy file exists
-    const candidate = path.join(UPLOADS_DIR, req.params.folder || '', filename);
-    if (fs.existsSync(candidate)) {
-      return res.sendFile(candidate);
-    }
-
-    return res.status(404).send('Image not found in database');
+    return res.status(404).send('Image not found in backend or database');
   } catch (err) {
     console.error('Database Upload Stream Error:', err);
     next(err);
@@ -150,6 +161,10 @@ app.use('/api/admin', customerRoutes);
 app.use('/api/admin', bannerRoutes);
 app.use('/api/admin', showcaseRoutes);
 app.use('/api/admin', kitShowcaseRoutes);
+app.use('/api/admin', chatbotRoutes);
+app.use('/api/admin', brandLogoRoutes);
+app.use('/api/admin', competitionRoutes);
+
 
 
 // Customer Storefront API Routes
@@ -158,13 +173,45 @@ app.use('/api/user', userProductRoutes);
 app.use('/api/user', userOrderRoutes);
 app.use('/api/user', userProfileRoutes);
 app.use('/api/user', userCartRoutes);
+app.use('/api/user', userWishlistRoutes);
+app.use('/api/user', userEnquiryRoutes);
+app.use('/api/user', userChatbotRoutes);
+app.use('/api/user', userModuleRoutes);
+app.use('/api/user', userPaymentRoutes);
+app.use('/api/user',userCompetitionRoute);
+
 
 // Centralized Error Handler
 app.use(errorHandler);
 
 // Start Express Server
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Express Backend Server running on port ${PORT} (Listening on 0.0.0.0 for local network access)`);
   console.log(`🛒 Storefront API: http://localhost:${PORT}/api/user`);
   console.log(`⚙️ Admin API: http://localhost:${PORT}/api/admin`);
+  ensureReviewsTable();
+  ensureChatbotTable();
 });
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} in use, retrying in 1s...`);
+    setTimeout(() => {
+      server.close();
+      server.listen(PORT, '0.0.0.0');
+    }, 1000);
+  } else {
+    console.error('Server error:', err);
+  }
+});
+
+const gracefulShutdown = () => {
+  server.close(() => {
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(0), 1000).unref();
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+process.once('SIGUSR2', gracefulShutdown);

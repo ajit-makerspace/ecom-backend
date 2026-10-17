@@ -1,4 +1,50 @@
 import db from '../../config/db.js';
+import { generateOrderNumber, getFiscalYearCode } from '../../utils/orderNumberGenerator.js';
+import emailService from '../../services/emailService.js';
+
+// Auto-migrate Razorpay & Delivery Date columns on orders table, and legacy order numbers
+async function ensureOrderColumns() {
+  try {
+    await db.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date TIMESTAMPTZ;
+      UPDATE orders SET delivery_date = updated_at WHERE LOWER(status) = 'delivered' AND delivery_date IS NULL;
+      UPDATE orders o
+      SET user_id = u.id
+      FROM users u
+      WHERE o.user_id IS NULL
+        AND LOWER(o.customer_email) = LOWER(u.email);
+    `);
+
+    // Auto-migrate existing orders to MSM format e.g. MSM26271001
+    const { rows: legacyOrders } = await db.query(`
+      SELECT id, order_number, created_at 
+      FROM orders 
+      ORDER BY id ASC
+    `);
+    let orderSeq = 1001;
+    for (const ord of legacyOrders) {
+      if (!ord.order_number || !ord.order_number.startsWith('MSM')) {
+        const fy = getFiscalYearCode(ord.created_at || new Date());
+        const newNum = `MSM${fy}${orderSeq}`;
+        await db.query('UPDATE orders SET order_number = $1 WHERE id = $2', [newNum, ord.id]);
+        orderSeq++;
+      } else {
+        const match = ord.order_number.match(/^MSM\d{4}(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num >= orderSeq) orderSeq = num + 1;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error ensuring columns on orders table:', err.message);
+  }
+}
+ensureOrderColumns();
 
 // Customer Place Order Controller (Transactional SQL)
 export const placeOrder = async (req, res) => {
@@ -86,13 +132,33 @@ export const placeOrder = async (req, res) => {
     const tax = 0.00;
     const totalAmount = subtotal + shippingFee + tax;
 
-    // Generate unique order number e.g. MS-849201
-    const orderNumber = `MS-${Math.floor(100000 + Math.random() * 900000)}`;
+    // Generate unique order number e.g. MSM26271001
+    const orderNumber = await generateOrderNumber(client);
 
     const customerName = `${finalFirstName.trim()} ${(finalLastName || '').trim()}`.trim();
     const customerEmail = String(finalEmail).trim().toLowerCase();
     const customerPhone = finalPhone ? String(finalPhone).trim() : null;
-    const userId = req.user?.id || null;
+    let userId = req.user?.id || null;
+    if (!userId && customerEmail) {
+      try {
+        const userLookup = await client.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [customerEmail]);
+        if (userLookup.rows.length > 0) {
+          userId = userLookup.rows[0].id;
+        }
+      } catch (e) {
+        console.error('Error looking up user by email in placeOrder:', e);
+      }
+    }
+    if (userId && customerPhone) {
+      try {
+        await client.query(
+          `UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2 AND (phone IS NULL OR phone = '')`,
+          [customerPhone, userId]
+        );
+      } catch (e) {
+        console.error('Error updating user phone in placeOrder:', e);
+      }
+    }
 
     // 2. Insert into orders table
     const orderInsertSql = `
@@ -115,12 +181,41 @@ export const placeOrder = async (req, res) => {
         payment_status,
         payment_method,
         notes,
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        requires_gst_invoice,
+        customer_gstin,
+        billing_business_name,
+        billing_address,
+        place_of_supply_state_code,
+        invoice_number,
+        invoice_date,
+        delivery_date,
         created_at,
         updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'Pending', 'Paid', $15, $16, NOW(), NOW()
-      ) RETURNING id, order_number, total_amount, status, created_at;
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+        $27, $28, $29, NOW(), NOW()
+      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, delivery_date, created_at;
     `;
+
+    const finalStatus = req.body.status || 'Pending';
+    const finalPaymentStatus = req.body.paymentStatus || req.body.payment_status || (finalPaymentMethod === 'Razorpay' ? 'Paid' : 'Pending');
+    const rzpOrderId = req.body.razorpay_order_id || req.body.razorpayOrderId || null;
+    const rzpPaymentId = req.body.razorpay_payment_id || req.body.razorpayPaymentId || null;
+    const rzpSignature = req.body.razorpay_signature || req.body.razorpaySignature || null;
+
+    const requiresGstInvoice = Boolean(req.body.requires_gst_invoice || req.body.requiresGstInvoice);
+    const customerGstin = requiresGstInvoice && req.body.customer_gstin ? String(req.body.customer_gstin).trim().toUpperCase() : null;
+    const billingBusinessName = requiresGstInvoice && req.body.billing_business_name ? String(req.body.billing_business_name).trim() : null;
+    const tradeName = requiresGstInvoice && req.body.trade_name ? String(req.body.trade_name).trim() : null;
+    const billingAddress = requiresGstInvoice && req.body.billing_address ? req.body.billing_address : null;
+    const placeOfSupply = customerGstin && customerGstin.length >= 2 ? customerGstin.slice(0, 2) : (req.body.place_of_supply_state_code || null);
+    const invoiceNumber = requiresGstInvoice ? `INV-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}` : null;
+    const invoiceDate = requiresGstInvoice ? new Date() : null;
+    const deliveryDate = String(finalStatus).trim().toLowerCase() === 'delivered' ? new Date() : (req.body.delivery_date ? new Date(req.body.delivery_date) : null);
 
     const orderValues = [
       orderNumber,
@@ -137,12 +232,67 @@ export const placeOrder = async (req, res) => {
       shippingFee,
       tax,
       totalAmount,
+      finalStatus,
+      finalPaymentStatus,
       String(finalPaymentMethod).trim(),
       notes ? String(notes).trim() : null,
+      rzpOrderId,
+      rzpPaymentId,
+      rzpSignature,
+      requiresGstInvoice,
+      customerGstin,
+      billingBusinessName,
+      billingAddress ? JSON.stringify(billingAddress) : null,
+      placeOfSupply,
+      invoiceNumber,
+      invoiceDate,
+      deliveryDate,
     ];
 
     const orderResult = await client.query(orderInsertSql, orderValues);
     const createdOrder = orderResult.rows[0];
+
+    // If customer provided GST profile and is logged in, upsert into user_gst_numbers
+    if (userId && customerGstin && billingBusinessName) {
+      try {
+        const countRes = await client.query(
+          `SELECT COUNT(*) FROM user_gst_numbers WHERE user_id = $1 AND status = 1`,
+          [userId]
+        );
+        const shouldBeDefault = parseInt(countRes.rows[0].count, 10) === 0;
+
+        await client.query(
+          `INSERT INTO user_gst_numbers (
+            user_id,
+            gstin,
+            legal_business_name,
+            trade_name,
+            billing_address_id,
+            is_default,
+            status,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, 1, NOW(), NOW())
+          ON CONFLICT (user_id, gstin)
+          DO UPDATE SET
+            legal_business_name = EXCLUDED.legal_business_name,
+            trade_name = COALESCE(EXCLUDED.trade_name, user_gst_numbers.trade_name),
+            billing_address_id = COALESCE(EXCLUDED.billing_address_id, user_gst_numbers.billing_address_id),
+            status = 1,
+            updated_at = NOW()`,
+          [
+            userId,
+            customerGstin,
+            billingBusinessName,
+            tradeName,
+            req.body.billing_address_id || null,
+            shouldBeDefault,
+          ]
+        );
+      } catch (gstErr) {
+        console.warn('Could not upsert user_gst_numbers:', gstErr.message);
+      }
+    }
 
     // 3. Insert order items
     for (const item of validatedItems) {
@@ -171,7 +321,77 @@ export const placeOrder = async (req, res) => {
       );
     }
 
+    // Insert payment record into payments table if online payment or provider IDs exist
+    if (rzpOrderId || rzpPaymentId || finalPaymentMethod === 'Razorpay') {
+      try {
+        const paymentStatus = finalPaymentStatus === 'Paid' ? 'SUCCESS' : 'PENDING';
+        const amountInPaise = Math.round(totalAmount * 100);
+        await client.query(
+          `INSERT INTO payments (
+            order_id,
+            provider,
+            provider_order_id,
+            provider_payment_id,
+            amount,
+            currency,
+            status,
+            payment_method,
+            failure_reason,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+          ON CONFLICT (order_id, provider, provider_order_id)
+          DO UPDATE SET
+            provider_payment_id = COALESCE(EXCLUDED.provider_payment_id, payments.provider_payment_id),
+            status = EXCLUDED.status,
+            updated_at = NOW()`,
+          [
+            createdOrder.id,
+            'razorpay',
+            rzpOrderId || `rzp_order_${createdOrder.id}_${Date.now()}`,
+            rzpPaymentId,
+            amountInPaise,
+            'INR',
+            paymentStatus,
+            finalPaymentMethod,
+            null,
+          ]
+        );
+      } catch (payErr) {
+        console.error('Error logging payment to payments table:', payErr.message);
+      }
+    }
+
     await client.query('COMMIT');
+
+    // Trigger Order Confirmation Email
+    if (customerEmail) {
+      emailService
+        .sendOrderConfirmationEmail({
+          email: customerEmail,
+          customerName: customerName || 'Valued Customer',
+          orderNumber: createdOrder.order_number,
+          items: validatedItems,
+          totalAmount,
+          subtotal,
+          shippingFee,
+          tax,
+          paymentMethod: finalPaymentMethod,
+          paymentStatus: finalPaymentStatus,
+          shippingAddress: finalAddress,
+          shippingCity: finalCity,
+          shippingState: finalState,
+          shippingPostalCode: finalZip,
+          shippingCountry: finalCountry,
+          createdAt: createdOrder.created_at,
+        })
+        .catch((emailErr) => {
+          console.error(
+            `Failed to send order confirmation email for order #${createdOrder.order_number}:`,
+            emailErr.message
+          );
+        });
+    }
 
     return res.status(201).json({
       success: true,
@@ -195,13 +415,21 @@ export const placeOrder = async (req, res) => {
   }
 };
 
-// Customer Get Own Orders Controller
 export const getUserOrders = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
+    const userEmail = req.user?.email ? String(req.user.email).trim().toLowerCase() : null;
 
-    const { rows } = await db.query(
-      `SELECT 
+    if (!userId && !userEmail) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required to view your orders.',
+        orders: [],
+      });
+    }
+
+    let queryText = `
+      SELECT 
         o.id,
         o.order_number AS "orderNumber",
         o.customer_name AS "customerName",
@@ -219,7 +447,20 @@ export const getUserOrders = async (req, res) => {
         o.status,
         o.payment_status AS "paymentStatus",
         o.payment_method AS "paymentMethod",
+        o.razorpay_order_id AS "razorpayOrderId",
+        o.razorpay_payment_id AS "razorpayPaymentId",
+        o.requires_gst_invoice AS "requiresGstInvoice",
+        o.customer_gstin AS "customerGstin",
+        o.billing_business_name AS "billingBusinessName",
+        o.billing_address AS "billingAddress",
+        o.invoice_number AS "invoiceNumber",
+        o.invoice_date AS "invoiceDate",
+        o.delivery_date AS "deliveryDate",
+        p.id AS "paymentId",
+        p.provider_payment_id AS "paymentProviderPaymentId",
+        p.status AS "paymentRecordStatus",
         o.created_at AS "createdAt",
+        o.updated_at AS "updatedAt",
         COALESCE(
           json_agg(
             json_build_object(
@@ -237,11 +478,26 @@ export const getUserOrders = async (req, res) => {
         ) AS items
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE o.user_id = $1
-      GROUP BY o.id
-      ORDER BY o.id DESC`,
-      [userId]
-    );
+      LEFT JOIN LATERAL (
+        SELECT id, provider_payment_id, status FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
+      ) p ON true
+    `;
+
+    const params = [];
+    if (userId && userEmail) {
+      params.push(userId, userEmail);
+      queryText += ` WHERE (o.user_id = $1 OR (o.user_id IS NULL AND LOWER(o.customer_email) = $2))`;
+    } else if (userId) {
+      params.push(userId);
+      queryText += ` WHERE o.user_id = $1`;
+    } else {
+      params.push(userEmail);
+      queryText += ` WHERE (o.user_id IS NULL AND LOWER(o.customer_email) = $1)`;
+    }
+
+    queryText += ` GROUP BY o.id, p.id, p.provider_payment_id, p.status ORDER BY o.id DESC LIMIT 50`;
+
+    const { rows } = await db.query(queryText, params);
 
     const orders = rows.map((ord) => ({
       ...ord,
@@ -261,11 +517,30 @@ export const getUserOrders = async (req, res) => {
   }
 };
 
-// Customer Get Single Order Details
+// Customer Get Single Order Details (RBAC - User's Own Order Only)
 export const getUserOrderById = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
+    const userId = req.user?.id || null;
+    const userEmail = req.user?.email ? String(req.user.email).trim().toLowerCase() : null;
+
+    if (!userId && !userEmail) {
+      return res.status(401).json({ success: false, message: 'Authentication required to view order details.' });
+    }
+
+    let filterClause = '';
+    const params = [String(id)];
+
+    if (userId && userEmail) {
+      params.push(userId, userEmail);
+      filterClause = `AND (o.user_id = $2 OR (o.user_id IS NULL AND LOWER(o.customer_email) = $3))`;
+    } else if (userId) {
+      params.push(userId);
+      filterClause = `AND o.user_id = $2`;
+    } else {
+      params.push(userEmail);
+      filterClause = `AND (o.user_id IS NULL AND LOWER(o.customer_email) = $2)`;
+    }
 
     const { rows } = await db.query(
       `SELECT 
@@ -286,7 +561,20 @@ export const getUserOrderById = async (req, res) => {
         o.status,
         o.payment_status AS "paymentStatus",
         o.payment_method AS "paymentMethod",
+        o.razorpay_order_id AS "razorpayOrderId",
+        o.razorpay_payment_id AS "razorpayPaymentId",
+        o.requires_gst_invoice AS "requiresGstInvoice",
+        o.customer_gstin AS "customerGstin",
+        o.billing_business_name AS "billingBusinessName",
+        o.billing_address AS "billingAddress",
+        o.invoice_number AS "invoiceNumber",
+        o.invoice_date AS "invoiceDate",
+        o.delivery_date AS "deliveryDate",
+        p.id AS "paymentId",
+        p.provider_payment_id AS "paymentProviderPaymentId",
+        p.status AS "paymentRecordStatus",
         o.created_at AS "createdAt",
+        o.updated_at AS "updatedAt",
         COALESCE(
           json_agg(
             json_build_object(
@@ -304,9 +592,12 @@ export const getUserOrderById = async (req, res) => {
         ) AS items
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE (o.id::text = $1 OR o.order_number = $1) AND o.user_id = $2
-      GROUP BY o.id`,
-      [id, userId]
+      LEFT JOIN LATERAL (
+        SELECT id, provider_payment_id, status FROM payments WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1
+      ) p ON true
+      WHERE (o.id::text = $1::text OR o.order_number::text = $1::text) ${filterClause}
+      GROUP BY o.id, p.id, p.provider_payment_id, p.status`,
+      params
     );
 
     if (rows.length === 0) {
