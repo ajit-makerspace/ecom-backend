@@ -774,10 +774,103 @@ export async function sendOrderStatusUpdateEmail({
   return info;
 }
 
+/**
+ * Send Administrator Portal Login Credentials
+ */
+export async function sendAdminCredentialsEmail({
+  email,
+  firstName = 'Administrator',
+  password,
+  roleName = 'ADMIN',
+  loginUrl,
+}) {
+  const portalUrl = loginUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/makerspace/admin`;
+  const subject = `Administrator Portal Access: Credentials - Makerspace Masters`;
+  const previewText = `Login credentials for your Makerspace Masters administrator account.`;
+
+  const bodyContent = `
+    <h2 style="font-size: 18px; font-weight: 800; color: #002740; margin-top: 0; margin-bottom: 8px;">
+      Hello ${firstName},
+    </h2>
+    <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0; line-height: 1.6;">
+      An administrator account has been set up for you on the <strong>Makerspace Masters</strong> management portal. Your login credentials and access details are provided below:
+    </p>
+
+    <!-- Credentials Card -->
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 24px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 8px 0; color: #64748b; font-weight: 600; width: 38%;">Portal URL:</td>
+          <td style="padding: 8px 0; color: #002740; font-weight: 700;">
+            <a href="${portalUrl}" style="color: #0071e3; text-decoration: none;">${portalUrl}</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748b; font-weight: 600;">Login ID (Email):</td>
+          <td style="padding: 8px 0; color: #002740; font-weight: 700; font-family: monospace; font-size: 14px;">
+            ${email}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748b; font-weight: 600;">Password:</td>
+          <td style="padding: 8px 0;">
+            <span style="display: inline-block; background: #e0e7ff; color: #3730a3; font-family: 'Courier New', Courier, monospace; font-size: 15px; font-weight: 800; letter-spacing: 1px; padding: 4px 10px; border-radius: 6px; border: 1px solid #c7d2fe;">
+              ${password}
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748b; font-weight: 600;">Assigned Role:</td>
+          <td style="padding: 8px 0; color: #002740; font-weight: 700;">
+            ${roleName}
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Security Notice -->
+    <div class="info-card">
+      <strong>Important Security Reminder:</strong> Please keep these credentials confidential. We recommend logging in promptly and updating your password under <strong>Settings &gt; Admin Profile</strong> to ensure account security.
+    </div>
+
+    <!-- CTA Button -->
+    <div style="text-align: center; margin: 28px 0 20px 0;">
+      <a href="${portalUrl}" style="display: inline-block; background: #002740; color: #ffffff; padding: 14px 32px; border-radius: 10px; font-size: 13px; font-weight: 800; text-decoration: none; box-shadow: 0 4px 12px rgba(0, 39, 64, 0.2);">
+        Sign In to Admin Portal &rarr;
+      </a>
+    </div>
+
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0;">
+      Regards,<br>
+      <strong>Makerspace Masters Administration</strong>
+    </p>
+  `;
+
+  const html = getEmailLayout({
+    title: subject,
+    previewText,
+    bodyContent,
+  });
+
+  const mailOptions = {
+    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+    to: email,
+    subject,
+    html,
+    text: `Administrator account created on Makerspace Masters portal.\n\nPortal URL: ${portalUrl}\nLogin ID: ${email}\nPassword: ${password}\nRole: ${roleName}\n\nPlease sign in and update your password immediately.`,
+    attachments: getStandardAttachments(),
+  };
+
+  const info = await transporter.sendMail(mailOptions);
+  return info;
+}
+
 export default {
   transporter,
   sendLoginOtpEmail,
   sendWelcomeEmail,
   sendOrderConfirmationEmail,
   sendOrderStatusUpdateEmail,
+  sendAdminCredentialsEmail,
 };
+
