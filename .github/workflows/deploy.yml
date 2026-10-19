@@ -1,1 +1,62 @@
 
+name: ecom-backend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ecommerce-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Production Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Validate Backend
+        run: node --check server.js
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+
+            cd /var/www/shop
+
+            echo "Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "Installing production dependencies..."
+            npm ci --omit=dev
+
+            echo "Restarting backend..."
+            if pm2 describe ecommerce-backend > /dev/null 2>&1; then
+              pm2 restart ecommerce-backend --update-env
+            else
+              pm2 start server.js --name ecommerce-backend
+            fi
+
+            pm2 save
+
+            echo "Deployment completed successfully."
