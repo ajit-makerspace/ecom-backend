@@ -44,7 +44,7 @@ jobs:
           script: |
             set -eu
 
-            APP_DIR="/var/www/ecommerce-backend"
+            APP_DIR="/var/www/shop"
             APP_NAME="ecommerce-backend"
             BRANCH="main"
 
