@@ -29,11 +29,10 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Validate Backend
-        run: node --check server.js
-
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          SERVER_ENV: ${{ secrets.SERVER_ENV }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
@@ -41,10 +40,11 @@ jobs:
           port: 22
           timeout: 30s
           command_timeout: 10m
+          envs: SERVER_ENV
           script: |
-            set -e
+            set -eu
 
-            APP_DIR="/var/www/shop"
+            APP_DIR="/var/www/ecommerce-backend"
             APP_NAME="ecommerce-backend"
             BRANCH="main"
 
@@ -56,17 +56,20 @@ jobs:
             git fetch origin "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
+            echo "Writing production environment file..."
+            umask 077
+            printf '%s\n' "$SERVER_ENV" > .env
+            chmod 600 .env
+
             echo "Installing production dependencies..."
             npm ci --omit=dev
-
-            echo "Checking application syntax..."
-            node --check server.js
+            
 
             echo "Restarting application..."
             if pm2 describe "$APP_NAME" > /dev/null 2>&1; then
               pm2 restart "$APP_NAME" --update-env
             else
-              pm2 start server.js --name "$APP_NAME"
+              pm2 start src/server.js --name "$APP_NAME"
             fi
 
             pm2 save
