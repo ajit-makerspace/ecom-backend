@@ -13,8 +13,8 @@ export const getCustomers = async (req, res) => {
         u.status,
         u.created_at AS "joinedDate",
         u.last_login_at AS "lastLoginAt",
-        COUNT(DISTINCT o.id)::int AS "ordersCount",
-        COALESCE(SUM(o.total_amount), 0)::numeric AS "totalSpent",
+        COALESCE(o.orders_count, 0)::int AS "ordersCount",
+        COALESCE(o.total_spent, 0)::numeric AS "totalSpent",
         COALESCE(
           (
             SELECT CONCAT(ua.address_line_1, ', ', ua.city, ', ', ua.state, ' ', ua.postal_code)
@@ -26,8 +26,14 @@ export const getCustomers = async (req, res) => {
           'No address on file'
         ) AS address
       FROM users u
-      LEFT JOIN orders o ON u.id = o.user_id
-      GROUP BY u.id
+      LEFT JOIN (
+        SELECT 
+          user_id,
+          COUNT(id)::int AS orders_count,
+          SUM(total_amount)::numeric AS total_spent
+        FROM orders
+        GROUP BY user_id
+      ) o ON u.id = o.user_id
       ORDER BY u.created_at DESC
     `);
 
