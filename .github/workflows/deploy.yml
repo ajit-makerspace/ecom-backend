@@ -42,6 +42,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASS }}
+          key: ${{ secrets.SERVER_KEY }}
           port: 22
           timeout: 30s
           command_timeout: 10m
@@ -186,9 +187,9 @@ jobs:
 
             if ! curl --fail --silent --show-error \
               --max-time 10 \
-              "http://127.0.0.1:$APP_PORT/" \
+              "http://127.0.0.1:$APP_PORT/health" \
               -o /dev/null; then
-              echo "WARNING: HTTP check on / failed."
+              echo "WARNING: HTTP check on /health failed."
               echo "Check the backend routes and logs."
               pm2 logs "$APP_NAME" --lines 30 --nostream || true
             fi
