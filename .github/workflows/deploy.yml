@@ -1,4 +1,4 @@
-
+```yaml
 name: Deploy E-commerce Backend
 
 on:
@@ -48,8 +48,9 @@ jobs:
             APP_DIR="/var/www/shop"
             APP_NAME="ecommerce-backend"
             BRANCH="main"
+            APP_PORT="3014"
 
-            echo "Starting deployment..."
+            echo "Starting e-commerce backend deployment..."
 
             mkdir -p "$APP_DIR"
 
@@ -81,6 +82,17 @@ jobs:
               exit 1
             fi
 
+            echo "Checking whether port $APP_PORT is available..."
+
+            if command -v ss >/dev/null 2>&1; then
+              if ss -lnt | awk -v port=":$APP_PORT" \
+                '$4 ~ (port "$") { found=1 } END { exit !found }'; then
+                echo "WARNING: Port $APP_PORT already has a listener."
+                echo "Verify that it belongs to $APP_NAME before proceeding."
+                exit 1
+              fi
+            fi
+
             echo "Writing production environment file..."
             umask 077
             printf '%s\n' "$SERVER_ENV" > .env
@@ -92,14 +104,38 @@ jobs:
             echo "Validating backend..."
             node --check src/server.js
 
-            echo "Restarting application..."
+            echo "Starting or restarting application on port $APP_PORT..."
+
             if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
-              pm2 restart "$APP_NAME" --update-env
-            else
-              pm2 start src/server.js --name "$APP_NAME"
+              pm2 delete "$APP_NAME"
             fi
+
+            PORT="$APP_PORT" pm2 start src/server.js \
+              --name "$APP_NAME" \
+              --update-env
 
             pm2 save
 
-            echo "Deployment completed successfully."
+            echo "Checking application status..."
+            sleep 3
             pm2 status "$APP_NAME"
+
+            if ! pm2 describe "$APP_NAME" | grep -q "online"; then
+              echo "ERROR: Application is not online."
+              pm2 logs "$APP_NAME" --lines 50 --nostream || true
+              exit 1
+            fi
+
+            echo "Checking local HTTP response..."
+            if ! curl --fail --silent --show-error \
+              --max-time 10 http://127.0.0.1:$APP_PORT/ \
+              -o /dev/null; then
+              echo "WARNING: HTTP check failed on /."
+              echo "The application may use a different route or need more startup time."
+              pm2 logs "$APP_NAME" --lines 30 --nostream || true
+            fi
+
+            echo "Deployment completed."
+            sudo ss -lntp | grep ":$APP_PORT" || true
+            pm2 status "$APP_NAME"
+```
