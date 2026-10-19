@@ -107,51 +107,12 @@ jobs:
             umask 077
             if [ -n "${ENV_B64:-}" ]; then
               echo "Writing .env from GitHub Secret..."
-              echo "$ENV_B64" | base64 -d > .env
-            else
-              echo "Writing default production .env..."
-              cat << 'EOF' > .env
-              PORT=3014
-
-              # Local Database Configuration (Commented out)
-              # DB_HOST=localhost
-              # DB_PORT=5432
-              # DB_USER=ajitkumar
-              # DB_PASSWORD=password
-              # DB_NAME=ecom
-
-              # Cloud Server Database Configuration (Active)
-              DB_HOST=45.195.159.94
-              DB_PORT=5433
-              DB_USER=postgres
-              DB_PASSWORD=makerShop@124
-              DB_NAME=makerspaceshop
-
-              JWT_SECRET=supersecretkey123_aura_admin
-
-              # Secondary Database Mirror (Disabled)
-              SECONDARY_DB_ENABLED=false
-              SECONDARY_DB_HOST=localhost
-              SECONDARY_DB_PORT=5434
-              SECONDARY_DB_USER=postgres
-              SECONDARY_DB_PASSWORD=
-              SECONDARY_DB_NAME=ecom
-
-              # SMTP Email Configuration
-              SMTP_HOST=smtp.gmail.com
-              SMTP_PORT=587
-              SMTP_SECURE=false
-              SMTP_USER=atin.d@makerspacemasters.com
-              SMTP_PASS=cntf qdsh efjv rver
-              SMTP_FROM=atin.d@makerspacemasters.com
-              SMTP_FROM_NAME="Makerspace Masters"
-
-              # Razorpay Payment Gateway Configuration
-              RAZORPAY_KEY_ID=rzp_test_TkjaGi6JMPu9c6
-              RAZORPAY_KEY_SECRET=lvubmQEsZJwbiJuCW7a3ZDIj
-              EOF
+              printf '%s' "$ENV_B64" | base64 -d > .env
+              chmod 600 .env
+            elif [ ! -f .env ]; then
+              echo "ERROR: .env file is missing and SERVER_ENV secret is not configured!"
+              exit 1
             fi
-            chmod 600 .env
 
             echo "Installing production dependencies..."
             npm ci --omit=dev
