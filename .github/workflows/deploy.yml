@@ -1,4 +1,3 @@
-```yaml
 name: Deploy E-commerce Backend
 
 on:
@@ -138,4 +137,3 @@ jobs:
             echo "Deployment completed."
             sudo ss -lntp | grep ":$APP_PORT" || true
             pm2 status "$APP_NAME"
-```
