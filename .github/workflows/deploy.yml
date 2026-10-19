@@ -1,5 +1,5 @@
 
-name: ecom-backend
+name: Deploy E-commerce Backend
 
 on:
   push:
@@ -32,31 +32,44 @@ jobs:
       - name: Validate Backend
         run: node --check server.js
 
-      - name: Deploy to Server
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
+          password: ${{ secrets.SERVER_PASS }}
+          port: 22
+          timeout: 30s
+          command_timeout: 10m
           script: |
             set -e
 
-            cd /var/www/shop
+            APP_DIR="/var/www/shop"
+            APP_NAME="ecommerce-backend"
+            BRANCH="main"
 
-            echo "Pulling latest code..."
-            git fetch origin main
-            git reset --hard origin/main
+            echo "Starting deployment..."
+
+            cd "$APP_DIR"
+
+            echo "Fetching latest code..."
+            git fetch origin "$BRANCH"
+            git reset --hard "origin/$BRANCH"
 
             echo "Installing production dependencies..."
             npm ci --omit=dev
 
-            echo "Restarting backend..."
-            if pm2 describe ecommerce-backend > /dev/null 2>&1; then
-              pm2 restart ecommerce-backend --update-env
+            echo "Checking application syntax..."
+            node --check server.js
+
+            echo "Restarting application..."
+            if pm2 describe "$APP_NAME" > /dev/null 2>&1; then
+              pm2 restart "$APP_NAME" --update-env
             else
-              pm2 start server.js --name ecommerce-backend
+              pm2 start server.js --name "$APP_NAME"
             fi
 
             pm2 save
 
             echo "Deployment completed successfully."
+            pm2 status "$APP_NAME"
