@@ -26,7 +26,11 @@ jobs:
           cache: npm
 
       - name: Validate Backend
-        run: node --check src/server.js
+        run: |
+          test -f package.json
+          test -f package-lock.json
+          test -f src/server.js
+          node --check src/server.js
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -51,11 +55,12 @@ jobs:
 
             echo "Starting e-commerce backend deployment..."
 
-            mkdir -p "$APP_DIR"
+            mkdir -p /var/www/shop
 
             if [ ! -d "$APP_DIR/.git" ]; then
-              if [ -n "$(ls -A "$APP_DIR")" ]; then
-                echo "ERROR: Directory is not empty and is not a Git repository."
+              if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
+                echo "ERROR: $APP_DIR exists but is not a Git repository."
+                echo "Refusing to delete or overwrite existing files."
                 exit 1
               fi
 
@@ -63,8 +68,7 @@ jobs:
               git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
             else
               cd "$APP_DIR"
-
-              echo "Updating repository..."
+              echo "Fetching latest code..."
               git fetch origin "$BRANCH"
               git reset --hard "origin/$BRANCH"
             fi
@@ -77,22 +81,14 @@ jobs:
             fi
 
             if [ ! -f src/server.js ]; then
-              echo "ERROR: src/server.js not found."
+              echo "ERROR: src/server.js is missing."
               exit 1
             fi
 
-            echo "Checking whether port $APP_PORT is available..."
+            echo "Validating backend..."
+            node --check src/server.js
 
-            if command -v ss >/dev/null 2>&1; then
-              if ss -lnt | awk -v port=":$APP_PORT" \
-                '$4 ~ (port "$") { found=1 } END { exit !found }'; then
-                echo "WARNING: Port $APP_PORT already has a listener."
-                echo "Verify that it belongs to $APP_NAME before proceeding."
-                exit 1
-              fi
-            fi
-
-            echo "Writing production environment file..."
+            echo "Writing production environment..."
             umask 077
             printf '%s\n' "$SERVER_ENV" > .env
             chmod 600 .env
@@ -100,40 +96,108 @@ jobs:
             echo "Installing production dependencies..."
             npm ci --omit=dev
 
-            echo "Validating backend..."
-            node --check src/server.js
-
-            echo "Starting or restarting application on port $APP_PORT..."
+            echo "Checking PM2 application..."
 
             if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
-              pm2 delete "$APP_NAME"
+              echo "Existing PM2 application found."
+
+              echo "Checking whether port $APP_PORT belongs to this application..."
+
+              APP_PID="$(pm2 pid "$APP_NAME" | head -n 1 | tr -d '[:space:]')"
+
+              LISTENER_PIDS=""
+
+              if command -v ss >/dev/null 2>&1; then
+                LISTENER_PIDS="$(
+                  ss -lntp "sport = :$APP_PORT" 2>/dev/null \
+                    | grep -oE 'pid=[0-9]+' \
+                    | cut -d= -f2 \
+                    | sort -u \
+                    || true
+                )"
+              fi
+
+              if [ -n "$LISTENER_PIDS" ]; then
+                MATCH=0
+
+                for PID in $LISTENER_PIDS; do
+                  if [ "$PID" = "$APP_PID" ]; then
+                    MATCH=1
+                  fi
+                done
+
+                if [ "$MATCH" -ne 1 ]; then
+                  echo "ERROR: Port $APP_PORT has a listener that does not match the PM2 application PID."
+                  echo "PM2 PID: $APP_PID"
+                  echo "Listener PID(s): $LISTENER_PIDS"
+                  echo "No process was killed. Resolve the conflict before deploying."
+                  exit 1
+                fi
+              fi
+
+              echo "Restarting existing PM2 application..."
+              PORT="$APP_PORT" pm2 restart "$APP_NAME" --update-env
+
+            else
+              echo "No existing PM2 application found."
+
+              if command -v ss >/dev/null 2>&1 &&
+                 ss -lnt "sport = :$APP_PORT" | grep -q LISTEN; then
+                echo "ERROR: Port $APP_PORT is already occupied."
+                echo "Refusing to start another application on this port."
+                ss -lntp "sport = :$APP_PORT" || true
+                exit 1
+              fi
+
+              echo "Starting new PM2 application..."
+              PORT="$APP_PORT" pm2 start src/server.js \
+                --name "$APP_NAME" \
+                --update-env
             fi
 
-            PORT="$APP_PORT" pm2 start src/server.js \
-              --name "$APP_NAME" \
-              --update-env
-
+            echo "Saving PM2 process list..."
             pm2 save
 
-            echo "Checking application status..."
-            sleep 3
+            echo "Waiting for application startup..."
+            sleep 5
+
+            echo "Checking PM2 status..."
             pm2 status "$APP_NAME"
 
-            if ! pm2 describe "$APP_NAME" | grep -q "online"; then
-              echo "ERROR: Application is not online."
+            STATUS="$(pm2 jlist | node -e '
+              let data = "";
+              process.stdin.on("data", chunk => data += chunk);
+              process.stdin.on("end", () => {
+                const apps = JSON.parse(data);
+                const app = apps.find(p => p.name === "ecommerce-backend");
+                console.log(app ? app.pm2_env.status : "missing");
+              });
+            ')"
+
+            if [ "$STATUS" != "online" ]; then
+              echo "ERROR: Application status is $STATUS."
+              pm2 logs "$APP_NAME" --lines 50 --nostream || true
+              exit 1
+            fi
+
+            echo "Checking port $APP_PORT..."
+            if ! ss -lnt "sport = :$APP_PORT" | grep -q LISTEN; then
+              echo "ERROR: No listener found on port $APP_PORT."
               pm2 logs "$APP_NAME" --lines 50 --nostream || true
               exit 1
             fi
 
             echo "Checking local HTTP response..."
+
             if ! curl --fail --silent --show-error \
-              --max-time 10 http://127.0.0.1:$APP_PORT/ \
+              --max-time 10 \
+              "http://127.0.0.1:$APP_PORT/" \
               -o /dev/null; then
-              echo "WARNING: HTTP check failed on /."
-              echo "The application may use a different route or need more startup time."
+              echo "WARNING: HTTP check on / failed."
+              echo "Check whether the backend uses a different route."
               pm2 logs "$APP_NAME" --lines 30 --nostream || true
             fi
 
-            echo "Deployment completed."
-            sudo ss -lntp | grep ":$APP_PORT" || true
+            echo "Deployment completed successfully."
             pm2 status "$APP_NAME"
+            ss -lntp "sport = :$APP_PORT" || true
