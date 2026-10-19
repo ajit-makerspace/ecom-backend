@@ -33,19 +33,32 @@ jobs:
           test -f src/server.js
           node --check src/server.js
 
+      - name: Prepare Production Environment
+        id: prep_env
+        env:
+          SECRET_ENV: ${{ secrets.SERVER_ENV }}
+        run: |
+          if [ -n "$SECRET_ENV" ]; then
+            B64=$(printf '%s' "$SECRET_ENV" | base64 | tr -d '\r\n')
+          else
+            B64=""
+          fi
+          echo "b64=$B64" >> "$GITHUB_OUTPUT"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
-          SERVER_ENV: ${{ secrets.SERVER_ENV }}
+          ENV_B64: ${{ steps.prep_env.outputs.b64 }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASS }}
+          key: ${{ secrets.SERVER_KEY }}
           port: 22
           timeout: 30s
           command_timeout: 10m
-          envs: SERVER_ENV,REPO_URL
+          envs: ENV_B64,REPO_URL
           script: |
             set -eu
 
@@ -90,9 +103,54 @@ jobs:
               exit 1
             }
 
-            echo "Writing production environment..."
+            echo "Configuring production environment..."
             umask 077
-            printf '%s\n' "$SERVER_ENV" > .env
+            if [ -n "${ENV_B64:-}" ]; then
+              echo "Writing .env from GitHub Secret..."
+              echo "$ENV_B64" | base64 -d > .env
+            else
+              echo "Writing default production .env..."
+              cat << 'EOF' > .env
+PORT=3014
+
+# Local Database Configuration (Commented out)
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_USER=ajitkumar
+# DB_PASSWORD=password
+# DB_NAME=ecom
+
+# Cloud Server Database Configuration (Active)
+DB_HOST=45.195.159.94
+DB_PORT=5433
+DB_USER=postgres
+DB_PASSWORD=makerShop@124
+DB_NAME=makerspaceshop
+
+JWT_SECRET=supersecretkey123_aura_admin
+
+# Secondary Database Mirror (Disabled)
+SECONDARY_DB_ENABLED=false
+SECONDARY_DB_HOST=localhost
+SECONDARY_DB_PORT=5434
+SECONDARY_DB_USER=postgres
+SECONDARY_DB_PASSWORD=
+SECONDARY_DB_NAME=ecom
+
+# SMTP Email Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=atin.d@makerspacemasters.com
+SMTP_PASS=cntf qdsh efjv rver
+SMTP_FROM=atin.d@makerspacemasters.com
+SMTP_FROM_NAME="Makerspace Masters"
+
+# Razorpay Payment Gateway Configuration
+RAZORPAY_KEY_ID=rzp_test_TkjaGi6JMPu9c6
+RAZORPAY_KEY_SECRET=lvubmQEsZJwbiJuCW7a3ZDIj
+EOF
+            fi
             chmod 600 .env
 
             echo "Installing production dependencies..."
@@ -186,9 +244,9 @@ jobs:
 
             if ! curl --fail --silent --show-error \
               --max-time 10 \
-              "http://127.0.0.1:$APP_PORT/" \
+              "http://127.0.0.1:$APP_PORT/health" \
               -o /dev/null; then
-              echo "WARNING: HTTP check on / failed."
+              echo "WARNING: HTTP check on /health failed."
               echo "Check the backend routes and logs."
               pm2 logs "$APP_NAME" --lines 30 --nostream || true
             fi
