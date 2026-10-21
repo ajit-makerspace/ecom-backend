@@ -5,15 +5,25 @@ on:
   push:
     branches:
       - main
+      - development
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'testing'
+        type: choice
+        options:
+          - testing
+          - production
 
 concurrency:
-  group: ecommerce-backend-production
+  group: ecommerce-backend-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy to Production Server
+    name: Deploy Backend
     runs-on: ubuntu-latest
 
     steps:
@@ -33,22 +43,31 @@ jobs:
           test -f src/server.js
           node --check src/server.js
 
-      - name: Prepare Production Environment
+      - name: Prepare Environment Secrets
         id: prep_env
         env:
-          SECRET_ENV: ${{ secrets.SERVER_ENV }}
+          TARGET_ENV: ${{ inputs.environment || 'testing' }}
+          TEST_ENV: ${{ secrets.SERVER_ENV_TEST || secrets.SERVER_ENV }}
+          PROD_ENV: ${{ secrets.SERVER_ENV_PROD || secrets.SERVER_ENV }}
         run: |
-          if [ -n "$SECRET_ENV" ]; then
-            B64=$(printf '%s' "$SECRET_ENV" | base64 | tr -d '\r\n')
+          if [ "$TARGET_ENV" = "production" ] && [ -n "$PROD_ENV" ]; then
+            SELECTED_ENV="$PROD_ENV"
+          else
+            SELECTED_ENV="$TEST_ENV"
+          fi
+          if [ -n "$SELECTED_ENV" ]; then
+            B64=$(printf '%s' "$SELECTED_ENV" | base64 | tr -d '\r\n')
           else
             B64=""
           fi
           echo "b64=$B64" >> "$GITHUB_OUTPUT"
+          echo "env_name=$TARGET_ENV" >> "$GITHUB_OUTPUT"
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         env:
           ENV_B64: ${{ steps.prep_env.outputs.b64 }}
+          ENV_NAME: ${{ steps.prep_env.outputs.env_name }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -58,16 +77,16 @@ jobs:
           port: 22
           timeout: 30s
           command_timeout: 10m
-          envs: ENV_B64,REPO_URL
+          envs: ENV_B64,ENV_NAME,REPO_URL
           script: |
             set -eu
 
             APP_DIR="/var/www/shop/ecom-backend"
             APP_NAME="ecommerce-backend"
-            BRANCH="main"
+            BRANCH="${{ github.ref_name }}"
             APP_PORT="3014"
 
-            echo "Starting e-commerce backend deployment..."
+            echo "Starting e-commerce backend deployment for $ENV_NAME (branch: $BRANCH)..."
 
             mkdir -p /var/www/shop
 
