@@ -141,7 +141,7 @@ export const updateOrderStatus = async (req, res) => {
       LEFT JOIN users u ON o.user_id = u.id
       LEFT JOIN order_items oi ON o.id = oi.order_id
       WHERE o.id::text = $1::text OR o.order_number::text = $1::text
-      GROUP BY o.id, u.id`,
+      GROUP BY o.id, u.id, u.email`,
       [id]
     );
 

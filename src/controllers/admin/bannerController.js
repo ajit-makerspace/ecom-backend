@@ -226,12 +226,12 @@ export const createBanner = async (req, res) => {
       endsAt,
     } = req.body;
 
-    if (!title || !title.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Banner title is required.',
-      });
-    }
+    // if (!title || !title.trim()) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: 'Banner title is required.',
+    //   });
+    // }
 
     const media = resolveMedia({ mediaType, imageUrl, videoUrl });
 
@@ -285,8 +285,8 @@ export const createBanner = async (req, res) => {
       [
         title.trim(),
         subtitle || '',
-        ctaText || 'Explore Hardware',
-        ctaLink || '/user/products',
+        ctaText || '',
+        ctaLink || '',
         secondaryText || '',
         secondaryLink || '',
         media.mediaType,
