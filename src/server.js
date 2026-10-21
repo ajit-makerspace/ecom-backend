@@ -40,10 +40,24 @@ import db from './config/db.js';
 const app = express();
 const PORT = process.env.PORT || 3005;
 
+// Disable ETag generation to prevent 304 Not Modified responses on dynamic API routes
+app.set('etag', false);
+
 // Global Middlewares
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Prevent browser/proxy caching for all dynamic API endpoints so fresh 200 OK data is always served
+app.use('/api', (req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+  });
+  next();
+});
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
 
@@ -73,7 +87,7 @@ app.get(['/api/product-images/:id', '/api/product-images/file/:filename'], async
   }
 });
 
-// Database Media Streamer: Streams images directly from PostgreSQL media_files table
+// Database Media Streamer: Streams images & videos directly from PostgreSQL media_files table with Range streaming support
 app.get('/api/media/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -88,9 +102,35 @@ app.get('/api/media/:id', async (req, res) => {
     }
 
     const file = rows[0];
-    res.setHeader('Content-Type', file.mime_type || 'image/jpeg');
+    const data = file.data;
+    const totalSize = data.length;
+    const mimeType = file.mime_type || 'image/jpeg';
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-    return res.end(file.data);
+
+    // Handle HTTP Range header for video streaming
+    const rangeHeader = req.headers.range;
+    if (rangeHeader && mimeType.startsWith('video/')) {
+      const parts = rangeHeader.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+
+      if (start >= totalSize || end >= totalSize) {
+        res.status(416).setHeader('Content-Range', `bytes */${totalSize}`);
+        return res.end();
+      }
+
+      const chunkSize = end - start + 1;
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+      res.setHeader('Content-Length', chunkSize);
+      return res.end(data.subarray(start, end + 1));
+    }
+
+    res.setHeader('Content-Length', totalSize);
+    return res.end(data);
   } catch (err) {
     console.error('Serve Media Error:', err);
     return res.status(500).send('Error loading media from database');

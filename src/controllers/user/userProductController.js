@@ -483,6 +483,7 @@ export const getStoreCategories = async (req, res) => {
         c.code,
         c.description,
         c.image_url AS image,
+        c.module_id AS "moduleId",
         (SELECT COUNT(*)::int FROM products p WHERE p.category_id = c.id AND p.status = 1) AS "productCount"
       FROM categories c
       WHERE c.status = 1

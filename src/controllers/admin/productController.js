@@ -251,8 +251,15 @@ export const createProduct = async (req, res) => {
 
     const cleanName = String(name).trim();
 
+    const baseSlug = slugify(cleanName);
+    const existingSlugRes = await db.query(
+      'SELECT id FROM products WHERE slug = $1 LIMIT 1',
+      [baseSlug]
+    );
     const generatedSlug =
-      `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
+      existingSlugRes.rows.length === 0
+        ? baseSlug
+        : `${baseSlug}-${Date.now().toString().slice(-4)}`;
 
     let cleanSku = sku ? String(sku).trim() : '';
 
