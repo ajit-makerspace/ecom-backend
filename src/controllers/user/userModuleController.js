@@ -118,8 +118,9 @@ export const getProductsAsPerModule = async (req, res) => {
 export const getUserModules = async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT id, name, image_url AS "imageUrl"
+      `SELECT id, name, slug, image_url AS "imageUrl"
          FROM modules
+        WHERE status = 1
         ORDER BY id ASC`
     );
 
