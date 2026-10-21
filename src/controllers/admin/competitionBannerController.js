@@ -151,12 +151,12 @@ export const createCompetitionBanner = async (req, res) => {
       isActive,
     } = req.body;
 
-    if (typeof title !== 'string' || !title.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Banner title is required.',
-      });
-    }
+    // if (typeof title !== 'string' || !title.trim()) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: 'Banner title is required.',
+    //   });
+    // }
 
     const media = resolveMedia({ mediaType, imageUrl, videoUrl });
 
@@ -212,10 +212,26 @@ export const createCompetitionBanner = async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, NOW())
       RETURNING ${BANNER_COLUMNS}`,
       [
-        title.trim(),
-        description ?? subtitle ?? '',
-        ctaText ?? ctaLabel ?? 'Register Now',
-        ctaLink ?? ctaUrl ?? '',
+        // title.trim(),
+        // description ?? subtitle ?? '',
+        // ctaText ?? ctaLabel ?? 'Register Now',
+        // ctaLink ?? ctaUrl ?? '',
+        typeof title === 'string' ? title.trim() : '',
+typeof description === 'string'
+  ? description.trim()
+  : typeof subtitle === 'string'
+    ? subtitle.trim()
+    : '',
+typeof ctaText === 'string'
+  ? ctaText.trim()
+  : typeof ctaLabel === 'string'
+    ? ctaLabel.trim()
+    : '',
+typeof ctaLink === 'string'
+  ? ctaLink.trim()
+  : typeof ctaUrl === 'string'
+    ? ctaUrl.trim()
+    : '',
         media.mediaType,
         media.imageUrl,
         media.videoUrl,
@@ -276,12 +292,12 @@ export const updateCompetitionBanner = async (req, res) => {
       isActive,
     } = req.body;
 
-    if (typeof title !== 'string' || !title.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Banner title is required.',
-      });
-    }
+    // if (typeof title !== 'string' || !title.trim()) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: 'Banner title is required.',
+    //   });
+    // }
 
     const media = resolveMedia({ mediaType, imageUrl, videoUrl });
 
@@ -358,10 +374,26 @@ export const updateCompetitionBanner = async (req, res) => {
          AND status != 2
        RETURNING ${BANNER_COLUMNS}`,
       [
-        title.trim(),
-        description ?? subtitle ?? '',
-        ctaText ?? ctaLabel ?? 'Register Now',
-        ctaLink ?? ctaUrl ?? '',
+        // title.trim(),
+        // description ?? subtitle ?? '',
+        // ctaText ?? ctaLabel ?? 'Register Now',
+        // ctaLink ?? ctaUrl ?? '',
+             typeof title === 'string' ? title.trim() : '',
+typeof description === 'string'
+  ? description.trim()
+  : typeof subtitle === 'string'
+    ? subtitle.trim()
+    : '',
+typeof ctaText === 'string'
+  ? ctaText.trim()
+  : typeof ctaLabel === 'string'
+    ? ctaLabel.trim()
+    : '',
+typeof ctaLink === 'string'
+  ? ctaLink.trim()
+  : typeof ctaUrl === 'string'
+    ? ctaUrl.trim()
+    : '',
         media.mediaType,
         media.imageUrl,
         media.videoUrl,
