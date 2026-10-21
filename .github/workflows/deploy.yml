@@ -1,0 +1,217 @@
+
+name: Deploy E-commerce Backend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ecommerce-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Production Server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Validate Backend
+        run: |
+          test -f package.json
+          test -f package-lock.json
+          test -f src/server.js
+          node --check src/server.js
+
+      - name: Prepare Production Environment
+        id: prep_env
+        env:
+          SECRET_ENV: ${{ secrets.SERVER_ENV }}
+        run: |
+          if [ -n "$SECRET_ENV" ]; then
+            B64=$(printf '%s' "$SECRET_ENV" | base64 | tr -d '\r\n')
+          else
+            B64=""
+          fi
+          echo "b64=$B64" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          ENV_B64: ${{ steps.prep_env.outputs.b64 }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASS }}
+          key: ${{ secrets.SERVER_KEY }}
+          port: 22
+          timeout: 30s
+          command_timeout: 10m
+          envs: ENV_B64,REPO_URL
+          script: |
+            set -eu
+
+            APP_DIR="/var/www/shop/ecom-backend"
+            APP_NAME="ecommerce-backend"
+            BRANCH="main"
+            APP_PORT="3014"
+
+            echo "Starting e-commerce backend deployment..."
+
+            mkdir -p /var/www/shop
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
+                echo "ERROR: Directory exists but is not a Git repository: $APP_DIR"
+                exit 1
+              fi
+
+              echo "Cloning repository..."
+              git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+            else
+              cd "$APP_DIR"
+              echo "Updating repository..."
+              git fetch origin "$BRANCH"
+              git reset --hard "origin/$BRANCH"
+            fi
+
+            cd "$APP_DIR"
+
+            test -f package.json || {
+              echo "ERROR: package.json missing"
+              exit 1
+            }
+
+            test -f package-lock.json || {
+              echo "ERROR: package-lock.json missing"
+              exit 1
+            }
+
+            test -f src/server.js || {
+              echo "ERROR: src/server.js missing"
+              exit 1
+            }
+
+            echo "Configuring production environment..."
+            umask 077
+            if [ -n "${ENV_B64:-}" ]; then
+              echo "Writing .env from GitHub Secret..."
+              printf '%s' "$ENV_B64" | base64 -d > .env
+              chmod 600 .env
+            elif [ ! -f .env ]; then
+              echo "ERROR: .env file is missing and SERVER_ENV secret is not configured!"
+              exit 1
+            fi
+
+            echo "Installing production dependencies..."
+            npm ci --omit=dev
+
+            echo "Validating backend..."
+            node --check src/server.js
+
+            echo "Checking port $APP_PORT..."
+
+            if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
+              echo "Existing PM2 application found."
+
+              APP_PID="$(pm2 pid "$APP_NAME" | head -n 1 | tr -d '[:space:]')"
+
+              LISTENER_PIDS="$(
+                ss -lntp "sport = :$APP_PORT" 2>/dev/null |
+                grep -oE 'pid=[0-9]+' |
+                cut -d= -f2 |
+                sort -u || true
+              )"
+
+              if [ -n "$LISTENER_PIDS" ]; then
+                MATCH=0
+
+                for PID in $LISTENER_PIDS; do
+                  if [ "$PID" = "$APP_PID" ]; then
+                    MATCH=1
+                  fi
+                done
+
+                if [ "$MATCH" -ne 1 ]; then
+                  echo "ERROR: Port $APP_PORT belongs to a different process."
+                  echo "PM2 PID: $APP_PID"
+                  echo "Listener PID(s): $LISTENER_PIDS"
+                  echo "No process was terminated."
+                  exit 1
+                fi
+              fi
+
+              echo "Restarting existing PM2 application..."
+              PORT="$APP_PORT" pm2 restart "$APP_NAME" --update-env
+
+            else
+              echo "PM2 application not found."
+
+              if ss -lnt "sport = :$APP_PORT" | grep -q LISTEN; then
+                echo "ERROR: Port $APP_PORT is already occupied."
+                ss -lntp "sport = :$APP_PORT" || true
+                exit 1
+              fi
+
+              echo "Starting application..."
+              PORT="$APP_PORT" pm2 start src/server.js \
+                --name "$APP_NAME" \
+                --update-env
+            fi
+
+            echo "Saving PM2 process list..."
+            pm2 save
+
+            sleep 5
+
+            echo "Checking application status..."
+
+            STATUS="$(pm2 jlist | node -e '
+              let data = "";
+              process.stdin.on("data", chunk => data += chunk);
+              process.stdin.on("end", () => {
+                const apps = JSON.parse(data);
+                const app = apps.find(p => p.name === "ecommerce-backend");
+                console.log(app ? app.pm2_env.status : "missing");
+              });
+            ')"
+
+            pm2 status "$APP_NAME"
+
+            if [ "$STATUS" != "online" ]; then
+              echo "ERROR: Application status is $STATUS."
+              pm2 logs "$APP_NAME" --lines 50 --nostream || true
+              exit 1
+            fi
+
+            if ! ss -lnt "sport = :$APP_PORT" | grep -q LISTEN; then
+              echo "ERROR: Nothing is listening on port $APP_PORT."
+              pm2 logs "$APP_NAME" --lines 50 --nostream || true
+              exit 1
+            fi
+
+            echo "Checking HTTP response..."
+
+            if ! curl --fail --silent --show-error \
+              --max-time 10 \
+              "http://127.0.0.1:$APP_PORT/health" \
+              -o /dev/null; then
+              echo "WARNING: HTTP check on /health failed."
+              echo "Check the backend routes and logs."
+              pm2 logs "$APP_NAME" --lines 30 --nostream || true
+            fi
+
+            echo "Deployment completed."
+            ss -lntp "sport = :$APP_PORT" || true
+            pm2 status "$APP_NAME"
