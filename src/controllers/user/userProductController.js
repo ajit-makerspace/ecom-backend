@@ -24,6 +24,8 @@ export const getStoreProducts = async (req, res) => {
         c.name AS "categoryName",
         c.slug AS "categorySlug",
         p.sub_category_id AS "subCategoryId",
+        p.module_id AS "moduleId",
+m.name AS "moduleName",
         sc.name AS "subCategoryName",
         p.brand_id AS "brandId",
         bl.name AS brand,
@@ -48,6 +50,9 @@ export const getStoreProducts = async (req, res) => {
       FROM products p
       JOIN categories c ON p.category_id = c.id AND c.status = 1
       LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status = 1
+      LEFT JOIN modules m
+  ON p.module_id = m.id
+  AND m.status = 1
       LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
       WHERE p.status = 1
     `;
@@ -376,6 +381,8 @@ export const getStoreKits = async (req, res) => {
         p.name,
         p.slug,
         p.sku,
+        p.module_id AS "moduleId",
+m.name AS "moduleName",
         p.category_id AS "categoryId",
         c.name AS "categoryName",
         c.slug AS "categorySlug",
@@ -415,6 +422,7 @@ export const getStoreKits = async (req, res) => {
         ) AS components
       FROM products p
       JOIN categories c ON p.category_id = c.id
+      LEFT JOIN modules m ON p.module_id = m.id AND m.status = 1
       LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
       WHERE p.is_kit = true AND p.status = 1
       ORDER BY p.is_featured DESC, p.sort_order ASC, p.id DESC
@@ -483,7 +491,6 @@ export const getStoreCategories = async (req, res) => {
         c.code,
         c.description,
         c.image_url AS image,
-        c.module_id AS "moduleId",
         (SELECT COUNT(*)::int FROM products p WHERE p.category_id = c.id AND p.status = 1) AS "productCount"
       FROM categories c
       WHERE c.status = 1
