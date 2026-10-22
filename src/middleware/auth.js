@@ -173,6 +173,9 @@ export function requireAdmin(req, res, next) {
   return requireRole([1, '1'])(req, res, next);
 }
 
+// Aliases for compatibility
+export const verifyAdminToken = [authenticateToken, requireAdmin];
+
 export function requireCustomer(req, res, next) {
   return (req, res, next) => {
     if (!req.user) {

@@ -19,6 +19,7 @@ import chatbotRoutes from './routes/admin/chatbotRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 import brandLogoRoutes from './routes/admin/brandLogoRoutes.js';
 import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
+import shippingRoutes from './routes/admin/shippingRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -204,6 +205,7 @@ app.use('/api/admin', kitShowcaseRoutes);
 app.use('/api/admin', chatbotRoutes);
 app.use('/api/admin', brandLogoRoutes);
 app.use('/api/admin', competitionRoutes);
+app.use('/api', shippingRoutes);
 
 
 
