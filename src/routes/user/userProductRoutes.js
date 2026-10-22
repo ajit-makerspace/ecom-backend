@@ -13,7 +13,7 @@ import {
 import { authenticateToken } from '../../middleware/auth.js';
 import { getPublicBanners } from '../../controllers/admin/bannerController.js';
 import { getPublicShowcases } from '../../controllers/admin/showcaseController.js';
-import {getUserBrandLogos} from '../../controllers/admin/brandRibbonController.js';
+import {getBrandFilterOptions, getFilteredBrandLogos, getUserBrandLogos} from '../../controllers/admin/brandRibbonController.js';
 
 const router = express.Router();
 
@@ -28,5 +28,7 @@ router.get('/categories', getStoreCategories);
 router.get('/banners', getPublicBanners);
 router.get('/showcases', getPublicShowcases);
 router.get('/brand-logos', getUserBrandLogos);
+router.get('/brand-logos/filter', getFilteredBrandLogos);
+router.get('/brand-logos/filter-options', getBrandFilterOptions);
 
 export default router;
