@@ -19,14 +19,11 @@ export const getCategories = async (req, res) => {
         c.name,
         c.slug,
         c.code,
-        c.module_id AS "moduleId",
-        m.name AS "moduleName",
         c.image_url AS image,
         c.status,
         c.created_at AS "createdAt",
         (SELECT COUNT(*)::int FROM products p WHERE p.category_id = c.id AND p.status != 2) AS "productCount"
       FROM categories c
-      LEFT JOIN modules m ON c.module_id = m.id AND m.status != 2
       WHERE c.status != 2
       ORDER BY c.id ASC
     `);
@@ -80,135 +77,135 @@ const getNextSubCategoryCode = async (clientOrDb = db) => {
 };
 
 // 2. Raw SQL Create Main Category
-export const createCategory = async (req, res) => {
-  try {
-    const { name, code, image, status, moduleId, moduleName } = req.body;
+// export const createCategory = async (req, res) => {
+//   try {
+//     const { name, code, image, status, moduleId, moduleName } = req.body;
 
-    if (!name || !name.trim()) {
-      return res.status(400).json({ success: false, message: 'Category name is required.' });
-    }
+//     if (!name || !name.trim()) {
+//       return res.status(400).json({ success: false, message: 'Category name is required.' });
+//     }
 
-    const cleanName = name.trim();
-    const baseSlug = slugify(cleanName);
-    const slug = `${baseSlug}-${Date.now().toString().slice(-4)}`;
+//     const cleanName = name.trim();
+//     const baseSlug = slugify(cleanName);
+//     const slug = `${baseSlug}-${Date.now().toString().slice(-4)}`;
 
-    const rawCode = String(code || '').replace(/\D/g, '');
-    const finalCode = rawCode.length === 4
-      ? rawCode
-      : await getNextCategoryCode();
+//     const rawCode = String(code || '').replace(/\D/g, '');
+//     const finalCode = rawCode.length === 4
+//       ? rawCode
+//       : await getNextCategoryCode();
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
-    const imageUrl = image && String(image).trim() ? String(image).trim() : null;
+//     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+//     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
-    // Resolve parent module_id
-    let parentModuleId = moduleId ? parseInt(moduleId, 10) : null;
-    let parentModuleName = moduleName || '';
+//     // Resolve parent module_id
+//     let parentModuleId = moduleId ? parseInt(moduleId, 10) : null;
+//     let parentModuleName = moduleName || '';
 
-    if (!parentModuleId && moduleName) {
-      const modRes = await db.query('SELECT id, name FROM modules WHERE LOWER(name) = LOWER($1)', [moduleName.trim()]);
-      if (modRes.rows.length > 0) {
-        parentModuleId = modRes.rows[0].id;
-        parentModuleName = modRes.rows[0].name;
-      }
-    }
+//     if (!parentModuleId && moduleName) {
+//       const modRes = await db.query('SELECT id, name FROM modules WHERE LOWER(name) = LOWER($1)', [moduleName.trim()]);
+//       if (modRes.rows.length > 0) {
+//         parentModuleId = modRes.rows[0].id;
+//         parentModuleName = modRes.rows[0].name;
+//       }
+//     }
 
-    if (!parentModuleId) {
-      const firstMod = await db.query('SELECT id, name FROM modules ORDER BY id ASC LIMIT 1');
-      if (firstMod.rows.length > 0) {
-        parentModuleId = firstMod.rows[0].id;
-        parentModuleName = firstMod.rows[0].name;
-      }
-    }
+//     if (!parentModuleId) {
+//       const firstMod = await db.query('SELECT id, name FROM modules ORDER BY id ASC LIMIT 1');
+//       if (firstMod.rows.length > 0) {
+//         parentModuleId = firstMod.rows[0].id;
+//         parentModuleName = firstMod.rows[0].name;
+//       }
+//     }
 
-    const { rows } = await db.query(
-      `INSERT INTO categories (name, slug, code, image_url, status, module_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, slug, code, module_id AS "moduleId", image_url AS image, status, created_at AS "createdAt"`,
-      [cleanName, slug, finalCode, imageUrl, statusInt, parentModuleId]
-    );
+//     const { rows } = await db.query(
+//       `INSERT INTO categories (name, slug, code, image_url, status, module_id)
+//        VALUES ($1, $2, $3, $4, $5, $6)
+//        RETURNING id, name, slug, code, module_id AS "moduleId", image_url AS image, status, created_at AS "createdAt"`,
+//       [cleanName, slug, finalCode, imageUrl, statusInt, parentModuleId]
+//     );
 
-    const created = rows[0];
-    created.status = created.status === 1 ? 'Active' : 'Inactive';
-    created.moduleName = parentModuleName;
-    created.productCount = 0;
+//     const created = rows[0];
+//     created.status = created.status === 1 ? 'Active' : 'Inactive';
+//     created.moduleName = parentModuleName;
+//     created.productCount = 0;
 
-    return res.status(201).json({
-      success: true,
-      message: 'Category created successfully.',
-      category: created,
-    });
-  } catch (err) {
-    console.error('Create Category Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to create category.' });
-  }
-};
+//     return res.status(201).json({
+//       success: true,
+//       message: 'Category created successfully.',
+//       category: created,
+//     });
+//   } catch (err) {
+//     console.error('Create Category Error:', err);
+//     return res.status(500).json({ success: false, message: 'Failed to create category.' });
+//   }
+// };
 
 // 3. Raw SQL Update Category
-export const updateCategory = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, code, image, status, moduleId, moduleName } = req.body;
+// export const updateCategory = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { name, code, image, status, moduleId, moduleName } = req.body;
 
-    if (!name || !name.trim()) {
-      return res.status(400).json({ success: false, message: 'Category name is required.' });
-    }
+//     if (!name || !name.trim()) {
+//       return res.status(400).json({ success: false, message: 'Category name is required.' });
+//     }
 
-    const cleanName = name.trim();
-    const slug = `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
-    const rawCode = String(code || '').replace(/\D/g, '');
-    const finalCode = rawCode.length === 4 ? rawCode : '1001';
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
-    const imageUrl = image && String(image).trim() ? String(image).trim() : null;
+//     const cleanName = name.trim();
+//     const slug = `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
+//     const rawCode = String(code || '').replace(/\D/g, '');
+//     const finalCode = rawCode.length === 4 ? rawCode : '1001';
+//     const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+//     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
-    let parentModuleId = moduleId ? parseInt(moduleId, 10) : null;
-    let parentModuleName = moduleName || '';
+//     let parentModuleId = moduleId ? parseInt(moduleId, 10) : null;
+//     let parentModuleName = moduleName || '';
 
-    if (!parentModuleId && moduleName) {
-      const modRes = await db.query('SELECT id, name FROM modules WHERE LOWER(name) = LOWER($1)', [moduleName.trim()]);
-      if (modRes.rows.length > 0) {
-        parentModuleId = modRes.rows[0].id;
-        parentModuleName = modRes.rows[0].name;
-      }
-    }
+//     if (!parentModuleId && moduleName) {
+//       const modRes = await db.query('SELECT id, name FROM modules WHERE LOWER(name) = LOWER($1)', [moduleName.trim()]);
+//       if (modRes.rows.length > 0) {
+//         parentModuleId = modRes.rows[0].id;
+//         parentModuleName = modRes.rows[0].name;
+//       }
+//     }
 
-    const { rows } = await db.query(
-      `UPDATE categories
-       SET name = $1, slug = $2, code = $3, image_url = $4, status = $5, module_id = $6, updated_at = NOW()
-       WHERE id = $7
-       RETURNING id, name, slug, code, module_id AS "moduleId", image_url AS image, status`,
-      [cleanName, slug, finalCode, imageUrl, statusInt, parentModuleId, id]
-    );
+//     const { rows } = await db.query(
+//       `UPDATE categories
+//        SET name = $1, slug = $2, code = $3, image_url = $4, status = $5, module_id = $6, updated_at = NOW()
+//        WHERE id = $7
+//        RETURNING id, name, slug, code, module_id AS "moduleId", image_url AS image, status`,
+//       [cleanName, slug, finalCode, imageUrl, statusInt, parentModuleId, id]
+//     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Category not found.' });
-    }
+//     if (rows.length === 0) {
+//       return res.status(404).json({ success: false, message: 'Category not found.' });
+//     }
 
-    // Cascade inactive status to child subcategories and products
-    if (statusInt === 0) {
-      await db.query(
-        `UPDATE subcategories SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
-        [id]
-      );
-      await db.query(
-        `UPDATE products SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
-        [id]
-      );
-    }
+//     // Cascade inactive status to child subcategories and products
+//     if (statusInt === 0) {
+//       await db.query(
+//         `UPDATE subcategories SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+//         [id]
+//       );
+//       await db.query(
+//         `UPDATE products SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+//         [id]
+//       );
+//     }
 
-    const updated = rows[0];
-    updated.status = updated.status === 1 ? 'Active' : 'Inactive';
-    updated.moduleName = parentModuleName;
+//     const updated = rows[0];
+//     updated.status = updated.status === 1 ? 'Active' : 'Inactive';
+//     updated.moduleName = parentModuleName;
 
-    return res.json({
-      success: true,
-      message: 'Category updated successfully.',
-      category: updated,
-    });
-  } catch (err) {
-    console.error('Update Category Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to update category.' });
-  }
-};
+//     return res.json({
+//       success: true,
+//       message: 'Category updated successfully.',
+//       category: updated,
+//     });
+//   } catch (err) {
+//     console.error('Update Category Error:', err);
+//     return res.status(500).json({ success: false, message: 'Failed to update category.' });
+//   }
+// };
 
 // 4. Raw SQL Delete Category (Soft Delete: status = 2)
 export const deleteCategory = async (req, res) => {
@@ -234,42 +231,42 @@ export const deleteCategory = async (req, res) => {
 };
 
 // 5. Raw SQL Get Sub-Categories (excluding status = 2)
-export const getSubCategories = async (req, res) => {
-  try {
-    const { rows } = await db.query(`
-      SELECT 
-        s.id,
-        s.name,
-        s.slug,
-        s.code,
-        s.category_id AS "categoryId",
-        c.name AS "categoryName",
-        c.module_id AS "moduleId",
-        m.name AS "moduleName",
-        s.image_url AS image,
-        s.status
-      FROM subcategories s
-      LEFT JOIN categories c ON s.category_id = c.id AND c.status != 2
-      LEFT JOIN modules m ON c.module_id = m.id AND m.status != 2
-      WHERE s.status != 2
-      ORDER BY s.id ASC
-    `);
+// export const getSubCategories = async (req, res) => {
+//   try {
+//     const { rows } = await db.query(`
+//       SELECT 
+//         s.id,
+//         s.name,
+//         s.slug,
+//         s.code,
+//         s.category_id AS "categoryId",
+//         c.name AS "categoryName",
+//         c.module_id AS "moduleId",
+//         m.name AS "moduleName",
+//         s.image_url AS image,
+//         s.status
+//       FROM subcategories s
+//       LEFT JOIN categories c ON s.category_id = c.id AND c.status != 2
+//       LEFT JOIN modules m ON c.module_id = m.id AND m.status != 2
+//       WHERE s.status != 2
+//       ORDER BY s.id ASC
+//     `);
 
-    const subCategories = rows.map((sub) => ({
-      ...sub,
-      status: sub.status === 1 ? 'Active' : 'Inactive',
-    }));
+//     const subCategories = rows.map((sub) => ({
+//       ...sub,
+//       status: sub.status === 1 ? 'Active' : 'Inactive',
+//     }));
 
-    return res.json({
-      success: true,
-      count: subCategories.length,
-      subCategories,
-    });
-  } catch (err) {
-    console.error('Get SubCategories Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch sub-categories.' });
-  }
-};
+//     return res.json({
+//       success: true,
+//       count: subCategories.length,
+//       subCategories,
+//     });
+//   } catch (err) {
+//     console.error('Get SubCategories Error:', err);
+//     return res.status(500).json({ success: false, message: 'Failed to fetch sub-categories.' });
+//   }
+// };
 
 // 6. Raw SQL Create Sub-Category
 export const createSubCategory = async (req, res) => {
@@ -601,5 +598,141 @@ export const bulkImportSubCategories = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Bulk sub-category import failed.' });
   } finally {
     client.release();
+  }
+};
+
+
+// New apis updated without dependency on module
+
+export const createCategory = async (req, res) => {
+  try {
+    const { name, code, image, status } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Category name is required.' });
+    }
+
+    const cleanName = name.trim();
+    const baseSlug = slugify(cleanName);
+    const slug = `${baseSlug}-${Date.now().toString().slice(-4)}`;
+
+    const rawCode = String(code || '').replace(/\D/g, '');
+    const finalCode = rawCode.length === 4
+      ? rawCode
+      : await getNextCategoryCode();
+
+    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const imageUrl = image && String(image).trim() ? String(image).trim() : null;
+
+    const { rows } = await db.query(
+      `INSERT INTO categories (name, slug, code, image_url, status)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, slug, code, image_url AS image, status, created_at AS "createdAt"`,
+      [cleanName, slug, finalCode, imageUrl, statusInt]
+    );
+
+    const created = rows[0];
+    created.status = created.status === 1 ? 'Active' : 'Inactive';
+    created.productCount = 0;
+
+    return res.status(201).json({
+      success: true,
+      message: 'Category created successfully.',
+      category: created,
+    });
+  } catch (err) {
+    console.error('Create Category Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to create category.' });
+  }
+};
+
+
+
+export const updateCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, code, image, status } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Category name is required.' });
+    }
+
+    const cleanName = name.trim();
+    const slug = `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
+    const rawCode = String(code || '').replace(/\D/g, '');
+    const finalCode = rawCode.length === 4 ? rawCode : '1001';
+    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const imageUrl = image && String(image).trim() ? String(image).trim() : null;
+
+    const { rows } = await db.query(
+      `UPDATE categories
+       SET name = $1, slug = $2, code = $3, image_url = $4, status = $5, updated_at = NOW()
+       WHERE id = $6
+       RETURNING id, name, slug, code, image_url AS image, status`,
+      [cleanName, slug, finalCode, imageUrl, statusInt, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Category not found.' });
+    }
+
+    // Cascade inactive status to child subcategories and products
+    if (statusInt === 0) {
+      await db.query(
+        `UPDATE subcategories SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+        [id]
+      );
+      await db.query(
+        `UPDATE products SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+        [id]
+      );
+    }
+
+    const updated = rows[0];
+    updated.status = updated.status === 1 ? 'Active' : 'Inactive';
+
+    return res.json({
+      success: true,
+      message: 'Category updated successfully.',
+      category: updated,
+    });
+  } catch (err) {
+    console.error('Update Category Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to update category.' });
+  }
+};
+
+
+export const getSubCategories = async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT 
+        s.id,
+        s.name,
+        s.slug,
+        s.code,
+        s.category_id AS "categoryId",
+        c.name AS "categoryName",
+        s.image_url AS image,
+        s.status
+      FROM subcategories s
+      LEFT JOIN categories c ON s.category_id = c.id AND c.status != 2
+      WHERE s.status != 2
+      ORDER BY s.id ASC
+    `);
+
+    const subCategories = rows.map((sub) => ({
+      ...sub,
+      status: sub.status === 1 ? 'Active' : 'Inactive',
+    }));
+
+    return res.json({
+      success: true,
+      count: subCategories.length,
+      subCategories,
+    });
+  } catch (err) {
+    console.error('Get SubCategories Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch sub-categories.' });
   }
 };
