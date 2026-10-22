@@ -89,127 +89,129 @@ const resolveBrandId = async (
 };
 
 // 1. Get All Products
-export const getProducts = async (req, res) => {
-  try {
-    const { rows } = await db.query(`
-      SELECT
-        p.id,
-        c.module_id AS "moduleId",
-        m.name AS "moduleName",
-        p.category_id AS "categoryId",
-        c.name AS "categoryName",
-        p.sub_category_id AS "subCategoryId",
-        sc.name AS "subCategoryName",
-        p.name,
-        p.slug,
-        p.sku,
-        p.description,
-       p.brand_id AS "brandId",
-bl.name AS brand,
-bl.logo_url AS "brandLogoUrl",
-        p.price,
-        p.old_price AS "oldPrice",
-        p.weight,
-        p.has_variants AS "hasVariants",
-        p.is_featured AS "isFeatured",
-        p.is_kit AS "isKit",
-        p.specifications,
-        p.kit_discount_percentage AS "kitDiscountPercentage",
+// export const getProducts = async (req, res) => {
+//   try {
+//     const { rows } = await db.query(`
+//       SELECT
+//         p.id,
+//         c.module_id AS "moduleId",
+//         m.name AS "moduleName",
+//         p.category_id AS "categoryId",
+//         c.name AS "categoryName",
+//         p.sub_category_id AS "subCategoryId",
+//         sc.name AS "subCategoryName",
+//         p.name,
+//         p.slug,
+//         p.sku,
+//         p.description,
+//        p.brand_id AS "brandId",
+// bl.name AS brand,
+// bl.logo_url AS "brandLogoUrl",
+//         p.price,
+//         p.old_price AS "oldPrice",
+//         p.weight,
+//         p.has_variants AS "hasVariants",
+//         p.is_featured AS "isFeatured",
+//         p.is_kit AS "isKit",
+//         p.specifications,
+//         p.kit_discount_percentage AS "kitDiscountPercentage",
 
-        (
-          SELECT json_agg(
-            json_build_object(
-              'productId', ki.product_id,
-              'quantity', ki.quantity,
-              'name', cp.name,
-              'sku', cp.sku,
-              'price', cp.price::numeric
-            )
-            ORDER BY ki.sort_order ASC
-          )
-          FROM kit_items ki
-          JOIN products cp ON ki.product_id = cp.id
-          WHERE ki.kit_id = p.id
-        ) AS "kitItems",
+//         (
+//           SELECT json_agg(
+//             json_build_object(
+//               'productId', ki.product_id,
+//               'quantity', ki.quantity,
+//               'name', cp.name,
+//               'sku', cp.sku,
+//               'price', cp.price::numeric
+//             )
+//             ORDER BY ki.sort_order ASC
+//           )
+//           FROM kit_items ki
+//           JOIN products cp ON ki.product_id = cp.id
+//           WHERE ki.kit_id = p.id
+//         ) AS "kitItems",
 
-        (
-          SELECT COUNT(*)::int
-          FROM kit_items ki
-          WHERE ki.kit_id = p.id
-        ) AS "componentsCount",
+//         (
+//           SELECT COUNT(*)::int
+//           FROM kit_items ki
+//           WHERE ki.kit_id = p.id
+//         ) AS "componentsCount",
 
-        p.sort_order AS "sortOrder",
-        p.meta_title AS "metaTitle",
-        p.meta_description AS "metaDescription",
-        p.image_url AS "image",
-        p.images AS "images",
-        p.status,
-        p.created_at AS "createdAt",
-        p.updated_at AS "updatedAt"
+//         p.sort_order AS "sortOrder",
+//         p.meta_title AS "metaTitle",
+//         p.meta_description AS "metaDescription",
+//         p.image_url AS "image",
+//         p.images AS "images",
+//         p.status,
+//         p.created_at AS "createdAt",
+//         p.updated_at AS "updatedAt"
 
-      FROM products p
-      LEFT JOIN categories c
-        ON p.category_id = c.id
-        AND c.status != 2
-      LEFT JOIN modules m
-        ON c.module_id = m.id
-        AND m.status != 2
-      LEFT JOIN subcategories sc
-        ON p.sub_category_id = sc.id
-        AND sc.status != 2
-        LEFT JOIN brand_logos bl
-  ON p.brand_id = bl.id
-  AND bl.status != 2
+//       FROM products p
+//       LEFT JOIN categories c
+//         ON p.category_id = c.id
+//         AND c.status != 2
+//       LEFT JOIN modules m
+//         ON c.module_id = m.id
+//         AND m.status != 2
+//       LEFT JOIN subcategories sc
+//         ON p.sub_category_id = sc.id
+//         AND sc.status != 2
+//         LEFT JOIN brand_logos bl
+//   ON p.brand_id = bl.id
+//   AND bl.status != 2
 
-      WHERE p.status != 2
-      ORDER BY p.id DESC
-    `);
+//       WHERE p.status != 2
+//       ORDER BY p.id DESC
+//     `);
 
-    const products = rows.map((prod) => ({
-      ...prod,
-      price: parseFloat(prod.price || 0),
-      oldPrice: prod.oldPrice
-        ? parseFloat(prod.oldPrice)
-        : null,
-      weight: prod.weight
-        ? parseFloat(prod.weight)
-        : null,
-      status: prod.status === 1 ? 'Active' : 'Inactive',
-      specifications:
-        typeof prod.specifications === 'object' &&
-        prod.specifications !== null
-          ? prod.specifications
-          : {},
-      images: Array.isArray(prod.images)
-        ? prod.images
-        : typeof prod.images === 'string'
-          ? JSON.parse(prod.images)
-          : prod.image
-            ? [prod.image]
-            : [],
-      kitItems: prod.kitItems || [],
-    }));
+//     const products = rows.map((prod) => ({
+//       ...prod,
+//       price: parseFloat(prod.price || 0),
+//       oldPrice: prod.oldPrice
+//         ? parseFloat(prod.oldPrice)
+//         : null,
+//       weight: prod.weight
+//         ? parseFloat(prod.weight)
+//         : null,
+//       status: prod.status === 1 ? 'Active' : 'Inactive',
+//       specifications:
+//         typeof prod.specifications === 'object' &&
+//         prod.specifications !== null
+//           ? prod.specifications
+//           : {},
+//       images: Array.isArray(prod.images)
+//         ? prod.images
+//         : typeof prod.images === 'string'
+//           ? JSON.parse(prod.images)
+//           : prod.image
+//             ? [prod.image]
+//             : [],
+//       kitItems: prod.kitItems || [],
+//     }));
 
-    return res.json({
-      success: true,
-      count: products.length,
-      products,
-    });
-  } catch (err) {
-    console.error('Get Products Error:', err);
+//     return res.json({
+//       success: true,
+//       count: products.length,
+//       products,
+//     });
+//   } catch (err) {
+//     console.error('Get Products Error:', err);
 
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch products.',
-    });
-  }
-};
+//     return res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch products.',
+//     });
+//   }
+// };
 
 // 2. Create Product
 export const createProduct = async (req, res) => {
   try {
     const {
       name,
+        moduleId, // ADD THIS
+
       categoryId,
       subCategoryId,
       sku,
@@ -372,15 +374,17 @@ export const createProduct = async (req, res) => {
         meta_description,
         image_url,
         images,
-        status
+        status,
+        module_id
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18, $19, $20, $21
+        $15, $16, $17, $18, $19, $20, $21, $22
       )
       RETURNING
         id,
+        module_id "moduleId",
         category_id AS "categoryId",
         sub_category_id AS "subCategoryId",
         name,
@@ -426,6 +430,7 @@ export const createProduct = async (req, res) => {
         primaryImage,
         imagesJson,
         statusInt,
+        moduleId
       ]
     );
 
@@ -1494,3 +1499,184 @@ const imagesJson = JSON.stringify(imageList);
   }
 };
 
+
+// updated code
+
+export const getProducts = async (req, res) => {
+  try {
+//     const { rows } = await db.query(`
+//       SELECT
+//         p.id,
+//         p.module_id AS "moduleId",
+// m.name AS "moduleName",
+//         p.category_id AS "categoryId",
+//         c.name AS "categoryName",
+//         p.sub_category_id AS "subCategoryId",
+//         sc.name AS "subCategoryName",
+//         p.name,
+//         p.slug,
+//         p.sku,
+//         p.description,
+//         p.brand_id AS "brandId",
+//         bl.name AS brand,
+//         bl.logo_url AS "brandLogoUrl",
+//         p.price,
+//         p.old_price AS "oldPrice",
+//         p.weight,
+//         p.has_variants AS "hasVariants",
+//         p.is_featured AS "isFeatured",
+//         p.is_kit AS "isKit",
+//         p.specifications,
+//         p.kit_discount_percentage AS "kitDiscountPercentage",
+
+//         (
+//           SELECT json_agg(
+//             json_build_object(
+//               'productId', ki.product_id,
+//               'quantity', ki.quantity,
+//               'name', cp.name,
+//               'sku', cp.sku,
+//               'price', cp.price::numeric
+//             )
+//             ORDER BY ki.sort_order ASC
+//           )
+//           FROM kit_items ki
+//           JOIN products cp ON ki.product_id = cp.id
+//           WHERE ki.kit_id = p.id
+//         ) AS "kitItems",
+
+//         (
+//           SELECT COUNT(*)::int
+//           FROM kit_items ki
+//           WHERE ki.kit_id = p.id
+//         ) AS "componentsCount",
+
+//         p.sort_order AS "sortOrder",
+//         p.meta_title AS "metaTitle",
+//         p.meta_description AS "metaDescription",
+//         p.image_url AS "image",
+//         p.images AS "images",
+//         p.status,
+//         p.created_at AS "createdAt",
+//         p.updated_at AS "updatedAt"
+
+//       FROM products p
+//       LEFT JOIN categories c
+//         ON p.category_id = c.id
+//         AND c.status != 2
+//       LEFT JOIN subcategories sc
+//         ON p.sub_category_id = sc.id
+//         AND sc.status != 2
+//       LEFT JOIN brand_logos bl
+//         ON p.brand_id = bl.id
+//         AND bl.status != 2
+//         LEFT JOIN modules m
+//   ON p.module_id = m.id
+
+//       WHERE p.status != 2
+//       ORDER BY p.id DESC
+//     `);
+
+
+const { rows } = await db.query(`
+  SELECT
+    p.id,
+
+    -- Module
+    p.module_id AS "moduleId",
+    m.name AS "moduleName",
+
+    -- Category
+    p.category_id AS "categoryId",
+    c.name AS "categoryName",
+
+    -- Subcategory
+    p.sub_category_id AS "subCategoryId",
+    sc.name AS "subCategoryName",
+
+    p.name,
+    p.slug,
+    p.sku,
+    p.description,
+    p.brand_id AS "brandId",
+    bl.name AS brand,
+    bl.logo_url AS "brandLogoUrl",
+    p.price,
+    p.old_price AS "oldPrice",
+    p.weight,
+    p.has_variants AS "hasVariants",
+    p.is_featured AS "isFeatured",
+    p.is_kit AS "isKit",
+    p.specifications,
+    p.kit_discount_percentage AS "kitDiscountPercentage",
+
+    -- Keep your existing kitItems and componentsCount subqueries here
+
+    p.sort_order AS "sortOrder",
+    p.meta_title AS "metaTitle",
+    p.meta_description AS "metaDescription",
+    p.image_url AS "image",
+    p.images AS "images",
+    p.status,
+    p.created_at AS "createdAt",
+    p.updated_at AS "updatedAt"
+
+  FROM products p
+
+  LEFT JOIN modules m
+    ON p.module_id = m.id
+
+  LEFT JOIN categories c
+    ON p.category_id = c.id
+    AND c.status != 2
+
+  LEFT JOIN subcategories sc
+    ON p.sub_category_id = sc.id
+    AND sc.status != 2
+
+  LEFT JOIN brand_logos bl
+    ON p.brand_id = bl.id
+    AND bl.status != 2
+
+  WHERE p.status != 2
+  ORDER BY p.id DESC
+`);
+    const products = rows.map((prod) => ({
+      ...prod,
+      price: parseFloat(prod.price || 0),
+      oldPrice: prod.oldPrice
+        ? parseFloat(prod.oldPrice)
+        : null,
+      weight: prod.weight
+        ? parseFloat(prod.weight)
+        : null,
+      status: prod.status === 1 ? 'Active' : 'Inactive',
+      specifications:
+        typeof prod.specifications === 'object' &&
+        prod.specifications !== null
+          ? prod.specifications
+          : {},
+      images: Array.isArray(prod.images)
+        ? prod.images
+        : typeof prod.images === 'string'
+          ? JSON.parse(prod.images)
+          : prod.image
+            ? [prod.image]
+            : [],
+      kitItems: prod.kitItems || [],
+    }));
+
+    return res.json({
+      success: true,
+      count: products.length,
+      products,
+    });
+  } catch (err) {
+    console.error('Get Products Error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch products.',
+    });
+  }
+};
