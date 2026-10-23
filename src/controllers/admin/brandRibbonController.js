@@ -109,6 +109,8 @@ export const getUserBrandLogos = async (req, res) => {
   }
 };
 
+
+
 /* Get one logo */
 export const getBrandLogoById = async (req, res) => {
   try {
