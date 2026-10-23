@@ -1,19 +1,19 @@
 /**
  * Shiprocket Logistics & Courier Integration Service
- * Supports both live Shiprocket API and resilient sandbox fallback mode.
+ * Real-time Courier Serviceability and TAT (Turnaround Time) Integration.
  */
 
 class ShiprocketService {
   constructor() {
-    this.env = process.env.SHIPROCKET_ENV || 'sandbox';
-    this.baseUrl = (process.env.SHIPROCKET_BASE_URL || 'https://api-sandbox.shiprocket.in').replace(/\/$/, '');
+    this.env = (process.env.SHIPROCKET_ENV || 'production').toLowerCase();
+    const rawBase = (process.env.SHIPROCKET_BASE_URL || 'https://apiv2.shiprocket.in').replace(/\/$/, '');
+    this.baseUrl = rawBase.replace(/\/v1\/external\/?$/, '');
     this.email = process.env.SHIPROCKET_EMAIL;
     this.password = process.env.SHIPROCKET_PASSWORD;
     this.pickupLocation = process.env.SHIPROCKET_PICKUP_LOCATION || 'Primary';
 
     this.cachedToken = null;
     this.tokenExpiresAt = null;
-    this.isSandboxRestricted = false; // Flag if sandbox ALB returns 498
   }
 
   /**
@@ -24,6 +24,14 @@ class ShiprocketService {
   }
 
   /**
+   * Clear cached authentication token
+   */
+  clearAuthToken() {
+    this.cachedToken = null;
+    this.tokenExpiresAt = null;
+  }
+
+  /**
    * Obtain or refresh Shiprocket Bearer Authentication Token
    */
   async getAuthToken() {
@@ -31,13 +39,14 @@ class ShiprocketService {
       throw new Error('Shiprocket credentials (SHIPROCKET_EMAIL, SHIPROCKET_PASSWORD) are not configured.');
     }
 
-    // Return cached token if valid (valid for up to 10 days, buffer 1 hour)
+    // Return cached token if valid (buffer 1 hour before expiry)
     if (this.cachedToken && this.tokenExpiresAt && Date.now() < this.tokenExpiresAt - 3600000) {
       return this.cachedToken;
     }
 
+    const loginUrl = `${this.baseUrl}/v1/external/auth/login`;
+
     try {
-      const loginUrl = `${this.baseUrl}/v1/external/auth/login`;
       const response = await fetch(loginUrl, {
         method: 'POST',
         headers: {
@@ -48,43 +57,34 @@ class ShiprocketService {
           email: this.email,
           password: this.password,
         }),
+        signal: AbortSignal.timeout(10000),
       });
 
       if (response.status === 498) {
-        console.warn('[Shiprocket] Received 498 Access Denied from sandbox ALB. Operating in resilient sandbox emulation mode.');
-        this.isSandboxRestricted = true;
-        this.cachedToken = 'SR_SANDBOX_MOCK_TOKEN_' + Date.now();
-        this.tokenExpiresAt = Date.now() + 240 * 3600000;
-        return this.cachedToken;
+        throw new Error('Shiprocket sandbox gateway returned HTTP 498: Access Denied. Sandbox upstream ALB is currently restricting external calls.');
       }
 
-      const data = await response.json().catch(() => null);
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { message: text };
+      }
 
       if (!response.ok || !data?.token) {
         const errorMsg = data?.message || `HTTP ${response.status}: Failed to authenticate with Shiprocket`;
-        console.warn(`[Shiprocket] Auth failed (${errorMsg}). Using sandbox fallback.`);
-        if (this.env === 'sandbox') {
-          this.isSandboxRestricted = true;
-          this.cachedToken = 'SR_SANDBOX_MOCK_TOKEN_' + Date.now();
-          this.tokenExpiresAt = Date.now() + 240 * 3600000;
-          return this.cachedToken;
-        }
         throw new Error(errorMsg);
       }
 
       this.cachedToken = data.token;
-      // Tokens are valid for 10 days (240 hours)
+      // Tokens are generally valid for 10 days (240 hours)
       this.tokenExpiresAt = Date.now() + 240 * 3600000;
-      this.isSandboxRestricted = false;
-      console.log('[Shiprocket] Successfully authenticated and retrieved access token.');
       return this.cachedToken;
     } catch (err) {
-      console.warn('[Shiprocket] Login network exception:', err.message);
-      if (this.env === 'sandbox') {
-        this.isSandboxRestricted = true;
-        this.cachedToken = 'SR_SANDBOX_MOCK_TOKEN_' + Date.now();
-        this.tokenExpiresAt = Date.now() + 240 * 3600000;
-        return this.cachedToken;
+      this.clearAuthToken();
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        throw new Error('Shiprocket authentication request timed out.');
       }
       throw err;
     }
@@ -95,13 +95,9 @@ class ShiprocketService {
    */
   async request(endpoint, options = {}) {
     const token = await this.getAuthToken();
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = `${this.baseUrl}${cleanEndpoint}`;
 
-    // If in sandbox emulation mode due to network / ALB 498
-    if (this.isSandboxRestricted && token.startsWith('SR_SANDBOX_MOCK_TOKEN')) {
-      return this.handleSandboxEmulation(endpoint, options);
-    }
-
-    const url = `${this.baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
     const headers = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
@@ -113,12 +109,12 @@ class ShiprocketService {
       const response = await fetch(url, {
         ...options,
         headers,
+        signal: options.signal || AbortSignal.timeout(10000),
       });
 
-      if (response.status === 498) {
-        console.warn(`[Shiprocket] 498 on ${endpoint}. Falling back to sandbox emulation.`);
-        this.isSandboxRestricted = true;
-        return this.handleSandboxEmulation(endpoint, options);
+      // If token expired upstream, clear cache
+      if (response.status === 401) {
+        this.clearAuthToken();
       }
 
       const text = await response.text();
@@ -126,189 +122,121 @@ class ShiprocketService {
       try {
         data = JSON.parse(text);
       } catch {
-        data = { text };
+        data = { message: text };
       }
 
       if (!response.ok) {
-        throw new Error(data?.message || `Shiprocket error on ${endpoint} (HTTP ${response.status})`);
+        const err = new Error(data?.message || `Shiprocket error on ${endpoint} (HTTP ${response.status})`);
+        err.status = response.status;
+        err.upstreamData = data;
+        throw err;
       }
 
       return data;
     } catch (err) {
-      if (this.env === 'sandbox') {
-        console.warn(`[Shiprocket] Exception on ${endpoint}: ${err.message}. Emulating sandbox response.`);
-        return this.handleSandboxEmulation(endpoint, options);
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        throw new Error(`Shiprocket request to ${endpoint} timed out.`);
       }
       throw err;
     }
   }
 
   /**
-   * Resilient Sandbox Mock Handler
-   * Used when sandbox ALB blocks external IPs with 498
+   * Normalize Shiprocket courier companies list into standard TAT estimate objects
    */
-  handleSandboxEmulation(endpoint, options = {}) {
-    console.log(`[Shiprocket:Sandbox] Emulating response for endpoint: ${endpoint}`);
+  normalizeCourierEstimates(couriers = []) {
+    if (!Array.isArray(couriers)) return [];
 
-    // 1. Serviceability Check
-    if (endpoint.includes('/courier/serviceability')) {
+    return couriers.map((courier) => {
+      // 1. Courier name
+      const courierName = courier.courier_name ? String(courier.courier_name).trim() : null;
+
+      // 2. Estimated Days (extract integer)
+      let estimatedDays = null;
+      if (courier.estimated_delivery_days != null) {
+        if (typeof courier.estimated_delivery_days === 'number') {
+          estimatedDays = Math.round(courier.estimated_delivery_days);
+        } else {
+          const match = String(courier.estimated_delivery_days).match(/\d+/);
+          if (match) {
+            estimatedDays = parseInt(match[0], 10);
+          }
+        }
+      }
+
+      // 3. Estimated Date (YYYY-MM-DD)
+      let estimatedDate = null;
+      if (courier.etd) {
+        try {
+          const etdStr = String(courier.etd).trim();
+          if (/^\d{4}-\d{2}-\d{2}$/.test(etdStr)) {
+            estimatedDate = etdStr;
+          } else {
+            const parsedDate = new Date(etdStr);
+            if (!isNaN(parsedDate.getTime())) {
+              estimatedDate = parsedDate.toISOString().split('T')[0];
+            }
+          }
+        } catch {
+          estimatedDate = null;
+        }
+      }
+
+      // 4. Estimated Hours
+      let estimatedHours = null;
+      if (courier.etd_hours != null) {
+        const hoursNum = Number(courier.etd_hours);
+        if (!isNaN(hoursNum) && isFinite(hoursNum)) {
+          estimatedHours = hoursNum;
+        }
+      } else if (estimatedDays !== null) {
+        estimatedHours = estimatedDays * 24;
+      }
+
+      // 5. Shipping Charge (prefer freight_charge, fallback to rate)
+      let shippingCharge = null;
+      if (courier.freight_charge != null && !isNaN(parseFloat(courier.freight_charge))) {
+        shippingCharge = parseFloat(courier.freight_charge);
+      } else if (courier.rate != null && !isNaN(parseFloat(courier.rate))) {
+        shippingCharge = parseFloat(courier.rate);
+      }
+
+      // 6. Courier Company ID
+      let courierCompanyId = null;
+      if (courier.courier_company_id != null && !isNaN(Number(courier.courier_company_id))) {
+        courierCompanyId = Number(courier.courier_company_id);
+      }
+
       return {
-        status: 200,
-        data: {
-          available_courier_companies: [
-            {
-              courier_company_id: 10,
-              courier_name: 'Delhivery Surface',
-              rate: 65.0,
-              rating: 4.6,
-              estimated_delivery_days: '3-4 Days',
-              etd: new Date(Date.now() + 4 * 86400000).toISOString().split('T')[0],
-              cod: 1,
-            },
-            {
-              courier_company_id: 2,
-              courier_name: 'Blue Dart Express',
-              rate: 95.0,
-              rating: 4.8,
-              estimated_delivery_days: '2 Days',
-              etd: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
-              cod: 1,
-            },
-            {
-              courier_company_id: 14,
-              courier_name: 'DTDC Surface',
-              rate: 55.0,
-              rating: 4.2,
-              estimated_delivery_days: '4-5 Days',
-              etd: new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0],
-              cod: 1,
-            },
-          ],
-        },
+        courierName,
+        estimatedDays,
+        estimatedDate,
+        estimatedHours,
+        shippingCharge,
+        courierCompanyId,
       };
-    }
-
-    // 2. Create Order / Adhoc
-    if (endpoint.includes('/orders/create/adhoc')) {
-      const payload = typeof options.body === 'string' ? JSON.parse(options.body) : (options.body || {});
-      const randomOrderId = Math.floor(10000000 + Math.random() * 90000000);
-      const randomShipmentId = Math.floor(20000000 + Math.random() * 80000000);
-      return {
-        order_id: randomOrderId,
-        shipment_id: randomShipmentId,
-        status: 'NEW',
-        status_code: 1,
-        onboarding_completed_now: 0,
-        awb_code: '',
-        courier_company_id: '',
-        courier_name: '',
-      };
-    }
-
-    // 3. Assign AWB
-    if (endpoint.includes('/courier/assign/awb')) {
-      const payload = typeof options.body === 'string' ? JSON.parse(options.body) : (options.body || {});
-      const randomAwb = 'SR' + Math.floor(1000000000 + Math.random() * 9000000000);
-      return {
-        awb_assign_status: 1,
-        response: {
-          data: {
-            awb_code: randomAwb,
-            courier_company_id: payload.courier_id || 10,
-            courier_name: payload.courier_id === 2 ? 'Blue Dart Express' : 'Delhivery Surface',
-            shipment_id: payload.shipment_id || Math.floor(20000000 + Math.random() * 80000000),
-          },
-        },
-      };
-    }
-
-    // 4. Generate Pickup
-    if (endpoint.includes('/courier/generate/pickup')) {
-      return {
-        pickup_status: 1,
-        response: {
-          pickup_token_number: 'PKP' + Math.floor(100000 + Math.random() * 900000),
-          pickup_scheduled_date: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-        },
-      };
-    }
-
-    // 5. Generate Label
-    if (endpoint.includes('/courier/generate/label')) {
-      return {
-        label_created: 1,
-        label_url: `/api/admin/shipping/view-label?sandbox=true&ts=${Date.now()}`,
-      };
-    }
-
-    // 6. Generate Invoice
-    if (endpoint.includes('/orders/print/invoice')) {
-      return {
-        is_invoice_created: true,
-        invoice_url: `/api/admin/shipping/view-invoice?sandbox=true&ts=${Date.now()}`,
-      };
-    }
-
-    // 7. Track AWB / Shipment
-    if (endpoint.includes('/courier/track')) {
-      return {
-        tracking_data: {
-          track_status: 1,
-          shipment_status: 6,
-          shipment_track: [
-            {
-              id: 1,
-              current_status: 'IN TRANSIT',
-              origin: 'Bengaluru Hub',
-              destination: 'Customer City',
-              courier_name: 'Delhivery Surface',
-              etd: new Date(Date.now() + 2 * 86400000).toISOString(),
-              scans: [
-                {
-                  date: new Date(Date.now() - 3600000).toISOString(),
-                  activity: 'Shipment has departed originating sorting facility',
-                  location: 'Bengaluru Hub',
-                  status: 'IN TRANSIT',
-                },
-                {
-                  date: new Date(Date.now() - 14400000).toISOString(),
-                  activity: 'Package received at central logistics center',
-                  location: 'Bengaluru Logistics Center',
-                  status: 'PICKED UP',
-                },
-                {
-                  date: new Date(Date.now() - 28800000).toISOString(),
-                  activity: 'Manifest generated & courier assigned',
-                  location: 'Makerspace Warehouse',
-                  status: 'MANIFEST GENERATED',
-                },
-              ],
-            },
-          ],
-        },
-      };
-    }
-
-    // 8. Cancel Shipment
-    if (endpoint.includes('/orders/cancel')) {
-      return {
-        status: 200,
-        message: 'Shipment cancelled successfully in sandbox.',
-      };
-    }
-
-    return { status: 200, message: 'Sandbox request completed' };
+    });
   }
 
   /**
    * Check Courier Serviceability for Delivery Pincode
    */
-  async checkServiceability({ pickupPincode = '560001', deliveryPincode, weight = 0.5, cod = 0 }) {
+  async checkServiceability({ pickupPincode, deliveryPincode, weight = 1, cod = 0 }) {
+    if (!pickupPincode) {
+      throw new Error('Pickup pincode is required to check serviceability.');
+    }
     if (!deliveryPincode) {
       throw new Error('Delivery pincode is required to check serviceability.');
     }
 
-    const endpoint = `/v1/external/courier/serviceability/?pickup_postcode=${pickupPincode}&delivery_postcode=${deliveryPincode}&weight=${weight}&cod=${cod ? 1 : 0}`;
+    const params = new URLSearchParams({
+      pickup_postcode: String(pickupPincode).trim(),
+      delivery_postcode: String(deliveryPincode).trim(),
+      weight: String(weight),
+      cod: String(cod ? 1 : 0),
+    });
+
+    const endpoint = `/v1/external/courier/serviceability/?${params.toString()}`;
     return this.request(endpoint, { method: 'GET' });
   }
 
