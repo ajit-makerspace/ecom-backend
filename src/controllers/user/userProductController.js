@@ -624,3 +624,87 @@ export const searchStoreProducts = async (req, res) => {
   }
 };
 
+// Get Public Store Contact Info from Default Active Warehouse Location
+export const getStoreContactInfo = async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT 
+        id,
+        name,
+        contact_name AS "contactName",
+        phone,
+        address_line1 AS "addressLine1",
+        address_line2 AS "addressLine2",
+        city,
+        state,
+        postal_code AS "postalCode",
+        country,
+        is_default AS "isDefault"
+      FROM public.warehouse_locations
+      WHERE is_active = TRUE
+      ORDER BY is_default DESC, id ASC
+      LIMIT 1`
+    );
+
+    if (rows.length === 0) {
+      return res.json({
+        success: true,
+        contact: {
+          addressLine1: 'B66, B Block, Sector 65, Noida',
+          addressLine2: '',
+          city: 'Gautam Budh Nagar',
+          state: 'Uttar Pradesh',
+          postalCode: '201309',
+          country: 'India',
+          phone: '1800 120 5900',
+          formattedAddress: 'B66, B Block, Sector 65, Noida, Uttar Pradesh, 201309',
+        },
+      });
+    }
+
+    const wh = rows[0];
+
+    const parts = [];
+    if (wh.addressLine1) parts.push(wh.addressLine1.trim());
+    if (wh.addressLine2) parts.push(wh.addressLine2.trim());
+
+    const a1 = (wh.addressLine1 || '').toLowerCase();
+    const c = (wh.city || '').trim();
+    const cLower = c.toLowerCase();
+
+    // Avoid duplicate district/city if address line 1 already includes Noida or the city name
+    if (c && !a1.includes(cLower) && !(a1.includes('noida') && cLower.includes('gautam budh nagar'))) {
+      parts.push(c);
+    }
+
+    if (wh.state) parts.push(wh.state.trim());
+    if (wh.postalCode) parts.push(wh.postalCode.trim());
+
+    const formattedAddress = parts.join(', ');
+
+    let displayPhone = wh.phone ? String(wh.phone).trim() : '';
+    if (!displayPhone || displayPhone.includes('YOUR_WAREHOUSE_PHONE') || displayPhone.length < 5) {
+      displayPhone = '1800 120 5900';
+    }
+
+    return res.json({
+      success: true,
+      contact: {
+        ...wh,
+        phone: displayPhone,
+        formattedAddress,
+      },
+    });
+  } catch (err) {
+    console.error('Failed to get store contact info from warehouse locations:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve store contact information.',
+      contact: {
+        formattedAddress: 'B66, B Block, Sector 65, Noida, Uttar Pradesh, 201309',
+        phone: '1800 120 5900',
+      },
+    });
+  }
+};
+

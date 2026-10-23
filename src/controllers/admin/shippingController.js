@@ -22,8 +22,23 @@ export const checkServiceability = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Delivery pincode is required.' });
     }
 
+    let effectivePickupPin = pickupPincode;
+    if (!effectivePickupPin) {
+      const { rows } = await db.query(
+        'SELECT postal_code FROM public.warehouse_locations WHERE is_default = TRUE AND is_active = TRUE LIMIT 1'
+      );
+      effectivePickupPin = rows[0]?.postal_code;
+    }
+
+    if (!effectivePickupPin) {
+      return res.status(400).json({
+        success: false,
+        message: 'No active default warehouse location configured.',
+      });
+    }
+
     const data = await shiprocketService.checkServiceability({
-      pickupPincode: pickupPincode || '560001',
+      pickupPincode: effectivePickupPin,
       deliveryPincode,
       weight: parseFloat(weight || 0.5),
       cod: cod ? 1 : 0,
@@ -38,8 +53,144 @@ export const checkServiceability = async (req, res) => {
       count: couriers.length,
     });
   } catch (err) {
-    console.error('Check Serviceability Error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Failed to check serviceability.' });
+    console.error('Check Serviceability Error:', err.message);
+    const status = err.status === 400 ? 400 : 502;
+    return res.status(status).json({ success: false, message: err.message || 'Failed to check serviceability.' });
+  }
+};
+
+// GET /api/shipping/tat?deliveryPincode=144012&weight=1&cod=0
+// Estimated Delivery Turnaround Time (TAT) and Serviceability Endpoint
+export const getShippingTat = async (req, res) => {
+  try {
+    const { deliveryPincode, weight, cod } = req.query;
+
+    // 1. Validate deliveryPincode: must be exactly 6 digits
+    if (!deliveryPincode || !/^\d{6}$/.test(String(deliveryPincode).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid delivery PIN code. Please enter a valid 6-digit PIN code.',
+      });
+    }
+
+    const cleanDeliveryPin = String(deliveryPincode).trim();
+
+    // 2. Validate weight: positive finite number (default: 1)
+    let parsedWeight = 1;
+    if (weight !== undefined && weight !== null && String(weight).trim() !== '') {
+      const w = parseFloat(weight);
+      if (isNaN(w) || !isFinite(w) || w <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid weight. Parcel weight must be a positive number.',
+        });
+      }
+      parsedWeight = w;
+    }
+
+    // 3. Validate cod: 0 or 1 (default: 0)
+    let parsedCod = 0;
+    if (cod !== undefined && cod !== null && String(cod).trim() !== '') {
+      const cStr = String(cod).trim();
+      if (cStr === '1' || cStr === 'true') {
+        parsedCod = 1;
+      } else if (cStr === '0' || cStr === 'false') {
+        parsedCod = 0;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid COD parameter. Must be 0 (prepaid) or 1 (cash on delivery).',
+        });
+      }
+    }
+
+    // 4. Query active default warehouse from PostgreSQL
+    const { rows: warehouseRows } = await db.query(
+      `SELECT
+        id,
+        name,
+        postal_code,
+        shiprocket_pickup_location
+      FROM public.warehouse_locations
+      WHERE is_default = TRUE
+        AND is_active = TRUE
+      LIMIT 1`
+    );
+
+    if (!warehouseRows || warehouseRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No active default warehouse location configured.',
+      });
+    }
+
+    const warehouse = warehouseRows[0];
+    const pickupPincode = String(warehouse.postal_code || '').trim();
+
+    if (!/^\d{6}$/.test(pickupPincode)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Active default warehouse has an invalid 6-digit postal code.',
+      });
+    }
+
+    // 5. Call Shiprocket serviceability
+    let response;
+    try {
+      response = await shiprocketService.checkServiceability({
+        pickupPincode,
+        deliveryPincode: cleanDeliveryPin,
+        weight: parsedWeight,
+        cod: parsedCod,
+      });
+    } catch (apiErr) {
+      console.warn('[Shiprocket TAT Serviceability Notice]:', apiErr.message);
+      const isClientError = apiErr.status === 400;
+      const statusCode = isClientError ? 400 : 502;
+      return res.status(statusCode).json({
+        success: false,
+        message: isClientError
+          ? apiErr.message
+          : 'Delivery estimation is temporarily unavailable. Please try again later.',
+        errorDetail: apiErr.message,
+      });
+    }
+
+    const couriers = response?.data?.available_courier_companies || response?.available_courier_companies || [];
+    const estimates = shiprocketService.normalizeCourierEstimates(couriers);
+
+    const warehouseData = {
+      id: Number(warehouse.id) || warehouse.id,
+      name: warehouse.name || 'Primary Warehouse',
+      pickupPincode,
+    };
+
+    if (estimates.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          warehouse: warehouseData,
+          deliveryPincode: cleanDeliveryPin,
+          estimates: [],
+        },
+        message: 'Delivery is not available for this PIN code.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        warehouse: warehouseData,
+        deliveryPincode: cleanDeliveryPin,
+        estimates,
+      },
+    });
+  } catch (err) {
+    console.error('Shiprocket TAT Controller Error:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve delivery turnaround time estimates.',
+    });
   }
 };
 

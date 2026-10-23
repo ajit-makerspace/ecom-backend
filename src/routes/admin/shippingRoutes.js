@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getShippingConfig,
   checkServiceability,
+  getShippingTat,
   createShipment,
   generateAWB,
   generateLabel,
@@ -12,6 +13,9 @@ import {
 import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 
 const router = express.Router();
+
+// Public Customer Shipping TAT / Serviceability
+router.get('/shipping/tat', getShippingTat);
 
 // Public / Admin label viewer
 router.get('/admin/shipping/view-label/:orderId', renderShippingLabel);

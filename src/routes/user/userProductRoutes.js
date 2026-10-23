@@ -5,6 +5,7 @@ import {
   getStoreCategories,
   getStoreKits,
   searchStoreProducts,
+  getStoreContactInfo,
 } from '../../controllers/user/userProductController.js';
 import {
   getProductReviews,
@@ -30,5 +31,7 @@ router.get('/showcases', getPublicShowcases);
 router.get('/brand-logos', getUserBrandLogos);
 router.get('/brand-logos/filter', getFilteredBrandLogos);
 router.get('/brand-logos/filter-options', getBrandFilterOptions);
+router.get('/contact-info', getStoreContactInfo);
+router.get('/warehouse/default', getStoreContactInfo);
 
 export default router;
