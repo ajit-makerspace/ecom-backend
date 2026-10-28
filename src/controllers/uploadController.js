@@ -1,9 +1,34 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
 import multer from 'multer';
-import sharp from 'sharp';
+import { createJimp } from '@jimp/core';
+import { defaultFormats, defaultPlugins } from 'jimp';
+import webpFormat from '@jimp/wasm-webp';
 import db from '../config/db.js';
 import ftpService from '../services/ftpStorageService.js';
+
+// Polyfill Node.js fetch for local wasm files needed by @jsquash/webp in Jimp
+if (typeof globalThis.fetch === 'function') {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, ...args) => {
+    const urlStr = String(url);
+    if (urlStr.startsWith('file:') && urlStr.endsWith('.wasm')) {
+      const data = await readFile(fileURLToPath(urlStr));
+      return new Response(data, {
+        headers: { 'content-type': 'application/wasm' },
+      });
+    }
+    return originalFetch(url, ...args);
+  };
+}
+
+// Configured Jimp instance with WebP encoder/decoder support
+const Jimp = createJimp({
+  formats: [...defaultFormats, webpFormat],
+  plugins: defaultPlugins,
+});
 
 // Allowed MIME types map
 const ALLOWED_MIME_TYPES = {
@@ -42,7 +67,7 @@ const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB for images / PDFs (unchanged)
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB for videos
 
 /**
- * Converts a raster image buffer into optimized WebP format.
+ * Converts a raster image buffer into optimized WebP format using Jimp.
  * Preserves vector graphics (SVG), documents (PDF), and videos without conversion.
  *
  * @param {Buffer} buffer - Original file buffer
@@ -60,10 +85,8 @@ export const convertToWebp = async (buffer, mimeType) => {
   }
 
   try {
-    const webpBuffer = await sharp(buffer, { animated: true })
-      .rotate()
-      .webp({ quality: 85, effort: 4 })
-      .toBuffer();
+    const image = await Jimp.read(buffer);
+    const webpBuffer = await image.getBuffer('image/webp', { quality: 85 });
 
     return {
       buffer: webpBuffer,
@@ -72,7 +95,7 @@ export const convertToWebp = async (buffer, mimeType) => {
       isConverted: true,
     };
   } catch (err) {
-    console.warn(`[WebP Conversion Warning] Failed converting ${mimeType} to WebP, falling back to original:`, err.message);
+    console.warn(`[WebP Conversion Warning] Failed converting ${mimeType} to WebP using Jimp, falling back to original:`, err.message);
     return {
       buffer,
       mimeType,
