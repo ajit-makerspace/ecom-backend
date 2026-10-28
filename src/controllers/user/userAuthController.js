@@ -568,3 +568,210 @@ export const resetPasswordWithOtp = async (req, res) => {
   }
 };
 
+/**
+ * Customer Google OAuth Controller
+ * Verifies Google ID token (credential) or Google OAuth2 accessToken,
+ * finds or registers the user in PostgreSQL, and issues platform JWT.
+ */
+export const googleLoginUser = async (req, res) => {
+  try {
+    const { credential, accessToken } = req.body;
+
+    if (!credential && !accessToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google authentication credential or access token is required.',
+      });
+    }
+
+    let googleUser = null;
+
+    // 1. Verify via ID Token (Credential)
+    if (credential) {
+      const verifyRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+      );
+      const data = await verifyRes.json();
+
+      if (!verifyRes.ok || data.error) {
+        return res.status(401).json({
+          success: false,
+          message: data.error_description || 'Invalid or expired Google credential.',
+        });
+      }
+
+      const expectedClientId =
+        process.env.GOOGLE_CLIENT_ID ||
+        '237399104322-0bbsognkgnb8d9dshehjl8roeb6fvdkv.apps.googleusercontent.com';
+      if (data.aud !== expectedClientId) {
+        console.warn(`[Google OAuth Warning] Token audience ${data.aud} did not match expected client ID.`);
+      }
+
+      if (data.email_verified !== 'true' && data.email_verified !== true) {
+        return res.status(400).json({
+          success: false,
+          message: 'Google email address is not verified.',
+        });
+      }
+
+      googleUser = {
+        googleId: data.sub,
+        email: String(data.email).toLowerCase().trim(),
+        firstName: data.given_name || (data.name ? data.name.split(' ')[0] : 'User'),
+        lastName: data.family_name || (data.name ? data.name.split(' ').slice(1).join(' ') : null),
+        picture: data.picture || null,
+      };
+    } else if (accessToken) {
+      // 2. Verify via Access Token
+      const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const data = await userinfoRes.json();
+
+      if (!userinfoRes.ok || data.error) {
+        return res.status(401).json({
+          success: false,
+          message: data.error_description || 'Invalid or expired Google access token.',
+        });
+      }
+
+      if (!data.email) {
+        return res.status(400).json({
+          success: false,
+          message: 'Unable to retrieve email from Google profile.',
+        });
+      }
+
+      googleUser = {
+        googleId: data.sub,
+        email: String(data.email).toLowerCase().trim(),
+        firstName: data.given_name || (data.name ? data.name.split(' ')[0] : 'User'),
+        lastName: data.family_name || (data.name ? data.name.split(' ').slice(1).join(' ') : null),
+        picture: data.picture || null,
+      };
+    }
+
+    if (!googleUser || !googleUser.email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to extract profile information from Google.',
+      });
+    }
+
+    // 3. Find existing user by google_id or email
+    const { rows: existingRows } = await db.query(
+      `SELECT id, email, first_name, last_name, phone, gender, date_of_birth, status, profile_image_url, google_id
+       FROM users
+       WHERE google_id = $1 OR LOWER(email) = $2
+       LIMIT 1`,
+      [googleUser.googleId, googleUser.email]
+    );
+
+    let user = null;
+    let isNewUser = false;
+
+    if (existingRows.length > 0) {
+      user = existingRows[0];
+
+      if (user.status !== 1) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been deactivated. Please contact support.',
+        });
+      }
+
+      // Update google_id, profile image if missing, and last_login_at
+      await db.query(
+        `UPDATE users
+         SET google_id = COALESCE(google_id, $1),
+             profile_image_url = COALESCE(profile_image_url, $2),
+             last_login_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $3`,
+        [googleUser.googleId, googleUser.picture, user.id]
+      );
+    } else {
+      // 4. Create new user with Google profile
+      isNewUser = true;
+      const insertQuery = `
+        INSERT INTO users (
+          email,
+          password_hash,
+          role,
+          status,
+          first_name,
+          last_name,
+          profile_image_url,
+          google_id,
+          last_login_at,
+          created_at,
+          updated_at
+        ) VALUES ($1, NULL, 1, 1, $2, $3, $4, $5, NOW(), NOW(), NOW())
+        RETURNING id, email, first_name, last_name, phone, gender, date_of_birth, role, status, profile_image_url, created_at;
+      `;
+
+      const insertValues = [
+        googleUser.email,
+        googleUser.firstName,
+        googleUser.lastName,
+        googleUser.picture,
+        googleUser.googleId,
+      ];
+
+      const newRes = await db.query(insertQuery, insertValues);
+      user = newRes.rows[0];
+
+      // Trigger welcome email in background
+      emailService
+        .sendWelcomeEmail({ email: googleUser.email, firstName: googleUser.firstName })
+        .catch((err) => {
+          console.warn('Notice: Background Google welcome email:', err.message);
+        });
+    }
+
+    // Fetch user default address if exists
+    const addrRes = await db.query(
+      'SELECT id, address_line_1, city, state, postal_code, country FROM user_addresses WHERE user_id = $1 ORDER BY is_default DESC LIMIT 1',
+      [user.id]
+    );
+
+    const payload = {
+      id: user.id,
+      email: user.email,
+      role: 'CUSTOMER',
+      user_type: 2,
+    };
+
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
+
+    return res.json({
+      success: true,
+      message: isNewUser
+        ? 'Account created and signed in with Google successfully!'
+        : 'Logged in with Google successfully.',
+      token,
+      isNewUser,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        phone: user.phone,
+        gender: user.gender,
+        dateOfBirth: user.date_of_birth,
+        profileImageUrl: user.profile_image_url || googleUser.picture,
+        role: 'Customer',
+        address: addrRes.rows[0] || null,
+      },
+    });
+  } catch (err) {
+    console.error('Google OAuth Controller Error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to authenticate with Google.',
+    });
+  }
+};
+

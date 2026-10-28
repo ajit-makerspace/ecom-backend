@@ -1,7 +1,9 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import multer from 'multer';
+import sharp from 'sharp';
 import db from '../config/db.js';
+import ftpService from '../services/ftpStorageService.js';
 
 // Allowed MIME types map
 const ALLOWED_MIME_TYPES = {
@@ -11,6 +13,9 @@ const ALLOWED_MIME_TYPES = {
   'image/webp': '.webp',
   'image/svg+xml': '.svg',
   'image/gif': '.gif',
+  'image/tiff': '.tiff',
+  'image/bmp': '.bmp',
+  'image/x-ms-bmp': '.bmp',
   'application/pdf': '.pdf',
   // Video (banners only, enforced in handleSingleUpload)
   'video/mp4': '.mp4',
@@ -18,11 +23,64 @@ const ALLOWED_MIME_TYPES = {
   'video/ogg': '.ogg',
 };
 
+// MIME types that should be automatically converted to WebP
+const CONVERTIBLE_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/tiff',
+  'image/bmp',
+  'image/x-ms-bmp',
+]);
+
 const VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/ogg']);
 const VIDEO_ALLOWED_FOLDERS = new Set(['banners']);
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB for images / PDFs (unchanged)
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB for videos
+
+/**
+ * Converts a raster image buffer into optimized WebP format.
+ * Preserves vector graphics (SVG), documents (PDF), and videos without conversion.
+ *
+ * @param {Buffer} buffer - Original file buffer
+ * @param {string} mimeType - Original MIME type
+ * @returns {Promise<{ buffer: Buffer, mimeType: string, ext: string, isConverted: boolean }>}
+ */
+export const convertToWebp = async (buffer, mimeType) => {
+  if (!CONVERTIBLE_IMAGE_MIME_TYPES.has(mimeType)) {
+    return {
+      buffer,
+      mimeType,
+      ext: ALLOWED_MIME_TYPES[mimeType] || '.bin',
+      isConverted: false,
+    };
+  }
+
+  try {
+    const webpBuffer = await sharp(buffer, { animated: true })
+      .rotate()
+      .webp({ quality: 85, effort: 4 })
+      .toBuffer();
+
+    return {
+      buffer: webpBuffer,
+      mimeType: 'image/webp',
+      ext: '.webp',
+      isConverted: true,
+    };
+  } catch (err) {
+    console.warn(`[WebP Conversion Warning] Failed converting ${mimeType} to WebP, falling back to original:`, err.message);
+    return {
+      buffer,
+      mimeType,
+      ext: ALLOWED_MIME_TYPES[mimeType] || '.png',
+      isConverted: false,
+    };
+  }
+};
 
 // Safe folder sanitizer
 export const sanitizeFolder = (folderName) => {
@@ -91,15 +149,37 @@ export const handleSingleUpload = async (req, res) => {
       });
     }
 
-    const ext = ALLOWED_MIME_TYPES[req.file.mimetype] || path.extname(req.file.originalname).toLowerCase() || '.png';
+    // Automatically convert eligible raster images to WebP
+    const converted = await convertToWebp(req.file.buffer, req.file.mimetype);
+    const ext = converted.ext;
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeName = `${folder}-${Date.now()}-${uniqueId}${ext}`;
 
+    let storageType = 'database';
+    let storagePath = null;
+    let dbBuffer = converted.buffer;
+
+    // Upload to FTP server if configured
+    if (ftpService.isFtpConfigured()) {
+      try {
+        const remotePath = ftpService.buildRemotePath(folder, safeName);
+        await ftpService.uploadBuffer(converted.buffer, remotePath);
+        storageType = 'ftp';
+        storagePath = remotePath;
+        dbBuffer = null; // Stored on FTP, omit heavy bytea in DB
+      } catch (ftpErr) {
+        console.warn(`[FTP Upload Warning] Failed to upload ${safeName} to FTP (${ftpErr.message}), falling back to database storage.`);
+        storageType = 'database';
+        storagePath = null;
+        dbBuffer = converted.buffer;
+      }
+    }
+
     const { rows } = await db.query(
-      `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, data)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, filename, mime_type, file_size`,
-      [safeName, req.file.originalname, req.file.mimetype, req.file.size, folder, req.file.buffer]
+      `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, storage_type, storage_path, data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, filename, mime_type, file_size, storage_type, storage_path`,
+      [safeName, req.file.originalname, converted.mimeType, converted.buffer.length, folder, storageType, storagePath, dbBuffer]
     );
 
     const mediaId = rows[0].id;
@@ -107,14 +187,18 @@ export const handleSingleUpload = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'File saved to database successfully.',
+      message: converted.isConverted
+        ? `Image converted to WebP and saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`
+        : `File saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`,
       url: relativeUrl,
       path: relativeUrl,
       mediaId,
       filename: safeName,
       originalName: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
+      mimetype: converted.mimeType,
+      size: converted.buffer.length,
+      storageType,
+      storagePath,
     });
   } catch (err) {
     console.error('Database Upload Error:', err);
@@ -160,24 +244,46 @@ export const handleBase64Upload = async (req, res) => {
       });
     }
 
-    const ext = ALLOWED_MIME_TYPES[mimeType] || '.png';
-    const buffer = Buffer.from(base64BufferData, 'base64');
+    const rawBuffer = Buffer.from(base64BufferData, 'base64');
 
-    if (buffer.length > MAX_FILE_SIZE) {
+    if (rawBuffer.length > MAX_FILE_SIZE) {
       return res.status(400).json({
         success: false,
         message: 'File size exceeds maximum allowed limit of 15MB.',
       });
     }
 
+    // Automatically convert eligible raster images to WebP
+    const converted = await convertToWebp(rawBuffer, mimeType);
+    const ext = converted.ext;
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeFilename = `${folder}-${Date.now()}-${uniqueId}${ext}`;
 
+    let storageType = 'database';
+    let storagePath = null;
+    let dbBuffer = converted.buffer;
+
+    // Upload to FTP server if configured
+    if (ftpService.isFtpConfigured()) {
+      try {
+        const remotePath = ftpService.buildRemotePath(folder, safeFilename);
+        await ftpService.uploadBuffer(converted.buffer, remotePath);
+        storageType = 'ftp';
+        storagePath = remotePath;
+        dbBuffer = null; // Stored on FTP, omit heavy bytea in DB
+      } catch (ftpErr) {
+        console.warn(`[FTP Base64 Upload Warning] Failed to upload ${safeFilename} to FTP (${ftpErr.message}), falling back to database storage.`);
+        storageType = 'database';
+        storagePath = null;
+        dbBuffer = converted.buffer;
+      }
+    }
+
     const { rows } = await db.query(
-      `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, data)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, filename, mime_type, file_size`,
-      [safeFilename, filename || safeFilename, mimeType, buffer.length, folder, buffer]
+      `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, storage_type, storage_path, data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, filename, mime_type, file_size, storage_type, storage_path`,
+      [safeFilename, filename || safeFilename, converted.mimeType, converted.buffer.length, folder, storageType, storagePath, dbBuffer]
     );
 
     const mediaId = rows[0].id;
@@ -185,13 +291,17 @@ export const handleBase64Upload = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'Base64 image saved to database successfully.',
+      message: converted.isConverted
+        ? `Base64 image converted to WebP and saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`
+        : `Base64 image saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`,
       url: relativeUrl,
       path: relativeUrl,
       mediaId,
       filename: safeFilename,
-      mimetype: mimeType,
-      size: buffer.length,
+      mimetype: converted.mimeType,
+      size: converted.buffer.length,
+      storageType,
+      storagePath,
     });
   } catch (err) {
     console.error('Database Base64 Upload Error:', err);
