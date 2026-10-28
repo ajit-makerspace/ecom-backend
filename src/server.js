@@ -35,6 +35,7 @@ import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 import userCompetitionRoute from "./routes/user/userCompetitionRoute.js"
+import ftpService from './services/ftpStorageService.js';
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -90,14 +91,14 @@ app.get(['/api/product-images/:id', '/api/product-images/file/:filename'], async
   }
 });
 
-// Database Media Streamer: Streams images & videos directly from PostgreSQL media_files table with Range streaming support
+// Database & FTP Media Streamer: Streams images & videos from FTP server or PostgreSQL media_files table with Range streaming support
 app.get('/api/media/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const isNumeric = /^\d+$/.test(id);
     const query = isNumeric
-      ? 'SELECT mime_type, data FROM media_files WHERE id = $1'
-      : 'SELECT mime_type, data FROM media_files WHERE filename = $1 LIMIT 1';
+      ? 'SELECT mime_type, data, storage_type, storage_path, file_size FROM media_files WHERE id = $1'
+      : 'SELECT mime_type, data, storage_type, storage_path, file_size FROM media_files WHERE filename = $1 LIMIT 1';
     const { rows } = await db.query(query, [id]);
 
     if (rows.length === 0) {
@@ -105,7 +106,21 @@ app.get('/api/media/:id', async (req, res) => {
     }
 
     const file = rows[0];
-    const data = file.data;
+    let data = file.data;
+
+    // If media is stored on FTP, retrieve from local disk cache or download from FTP
+    if (!data && file.storage_type === 'ftp' && file.storage_path) {
+      try {
+        data = await ftpService.downloadBuffer(file.storage_path);
+      } catch (ftpErr) {
+        console.error(`[FTP Media Stream Error] Failed to retrieve ${file.storage_path}:`, ftpErr.message);
+      }
+    }
+
+    if (!data) {
+      return res.status(404).send('Media data not available');
+    }
+
     const totalSize = data.length;
     const mimeType = file.mime_type || 'image/jpeg';
 
@@ -136,7 +151,7 @@ app.get('/api/media/:id', async (req, res) => {
     return res.end(data);
   } catch (err) {
     console.error('Serve Media Error:', err);
-    return res.status(500).send('Error loading media from database');
+    return res.status(500).send('Error loading media');
   }
 });
 
@@ -162,16 +177,26 @@ app.get('/uploads/*', async (req, res, next) => {
       return res.end(prodImgRes.rows[0].data);
     }
 
-    // 2. Check PostgreSQL media_files table
+    // 2. Check PostgreSQL media_files table (database or FTP)
     const { rows } = await db.query(
-      'SELECT mime_type, data FROM media_files WHERE filename = $1 LIMIT 1',
+      'SELECT mime_type, data, storage_type, storage_path FROM media_files WHERE filename = $1 LIMIT 1',
       [filename]
     );
 
     if (rows.length > 0) {
-      res.setHeader('Content-Type', rows[0].mime_type || 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-      return res.end(rows[0].data);
+      let data = rows[0].data;
+      if (!data && rows[0].storage_type === 'ftp' && rows[0].storage_path) {
+        try {
+          data = await ftpService.downloadBuffer(rows[0].storage_path);
+        } catch (ftpErr) {
+          console.error(`[FTP Upload Stream Error] Failed to retrieve ${rows[0].storage_path}:`, ftpErr.message);
+        }
+      }
+      if (data) {
+        res.setHeader('Content-Type', rows[0].mime_type || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+        return res.end(data);
+      }
     }
 
     return res.status(404).send('Image not found in backend or database');

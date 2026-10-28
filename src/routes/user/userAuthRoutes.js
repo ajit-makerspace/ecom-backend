@@ -2,6 +2,7 @@ import express from 'express';
 import {
   registerUser,
   loginUser,
+  googleLoginUser,
   getCustomerMe,
   sendLoginOtp,
   verifyLoginOtp,
@@ -15,6 +16,7 @@ const router = express.Router();
 // Customer Auth Endpoints
 router.post('/register', registerUser);
 router.post('/login', loginUser);
+router.post('/google', googleLoginUser);
 router.post('/send-login-otp', sendLoginOtp);
 router.post('/verify-login-otp', verifyLoginOtp);
 router.post('/send-reset-otp', sendPasswordResetOtp);
