@@ -1,6 +1,7 @@
 import express from 'express';
 import { multerUpload, handleSingleUpload, handleBase64Upload } from '../controllers/uploadController.js';
 import { authenticateToken } from '../middleware/auth.js';
+import ftpService from '../services/ftpStorageService.js';
 
 const router = express.Router();
 
@@ -36,5 +37,21 @@ router.post('/upload/base64', handleBase64Upload);
 
 // Admin-specific upload endpoint
 router.post('/admin/upload', uploadFileMiddleware, handleSingleUpload);
+
+// Check FTP storage connection status & diagnostic details
+const getFtpStatusHandler = async (req, res) => {
+  try {
+    const status = await ftpService.testConnection();
+    return res.json(status);
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to connect to FTP server',
+    });
+  }
+};
+
+router.get('/ftp-status', getFtpStatusHandler);
+router.get('/upload/ftp-status', getFtpStatusHandler);
 
 export default router;
