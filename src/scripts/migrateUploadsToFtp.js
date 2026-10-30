@@ -14,7 +14,10 @@ const getFtpConfig = () => ({
   port: parseInt(process.env.FTP_PORT || '21', 10),
   user: process.env.FTP_USER || '',
   password: process.env.FTP_PASSWORD || '',
-  secure: process.env.FTP_SECURE === 'true',
+  secure: process.env.FTP_SECURE === 'true' || process.env.FTP_SECURE === 'explicit',
+  secureOptions: {
+    rejectUnauthorized: process.env.FTP_REJECT_UNAUTHORIZED === 'true',
+  },
 });
 
 const getFtpBaseDir = () => {

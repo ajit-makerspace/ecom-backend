@@ -18,13 +18,22 @@ try {
 /**
  * Returns FTP configuration from environment variables
  */
-export const getFtpConfig = () => ({
-  host: process.env.FTP_HOST || '192.168.1.173',
-  port: parseInt(process.env.FTP_PORT || '21', 10),
-  user: process.env.FTP_USER || '',
-  password: process.env.FTP_PASSWORD || '',
-  secure: process.env.FTP_SECURE === 'true',
-});
+export const getFtpConfig = () => {
+  const isSecure = process.env.FTP_SECURE === 'true' || process.env.FTP_SECURE === 'explicit';
+  // Allow self-signed or internal CA certs by default unless strictly enforced with FTP_REJECT_UNAUTHORIZED=true
+  const rejectUnauthorized = process.env.FTP_REJECT_UNAUTHORIZED === 'true';
+
+  return {
+    host: process.env.FTP_HOST || '192.168.1.173',
+    port: parseInt(process.env.FTP_PORT || '21', 10),
+    user: process.env.FTP_USER || '',
+    password: process.env.FTP_PASSWORD || '',
+    secure: isSecure,
+    secureOptions: {
+      rejectUnauthorized,
+    },
+  };
+};
 
 /**
  * Check if FTP storage is enabled and configured
@@ -58,10 +67,32 @@ export const buildRemotePath = (folder = 'general', filename) => {
  * Executes a callback with an authenticated FTP client and automatically closes connection
  */
 export const withFtpClient = async (callback) => {
-  const client = new ftp.Client();
+  let client = new ftp.Client();
   client.ftp.timeout = 15000; // 15 seconds timeout
+  const config = getFtpConfig();
+
   try {
-    await client.access(getFtpConfig());
+    try {
+      await client.access(config);
+    } catch (accessErr) {
+      // If server explicitly refuses unencrypted connections (421 Please reconnect using TLS), auto-upgrade
+      const errMsg = String(accessErr?.message || '');
+      if (!config.secure && (errMsg.includes('TLS') || errMsg.includes('421'))) {
+        console.log('[FTP Storage] Server requested TLS security. Auto-negotiating TLS connection with self-signed certificate support...');
+        client.close();
+        client = new ftp.Client();
+        client.ftp.timeout = 15000;
+        await client.access({
+          ...config,
+          secure: true,
+          secureOptions: {
+            rejectUnauthorized: process.env.FTP_REJECT_UNAUTHORIZED === 'true',
+          },
+        });
+      } else {
+        throw accessErr;
+      }
+    }
     return await callback(client);
   } finally {
     client.close();
