@@ -5,6 +5,7 @@ import db from '../../config/db.js';
 import { USER_TYPES, ROLE_PERMISSIONS } from '../../config/userTypes.js';
 import { JWT_SECRET } from '../../config/jwt.js';
 import { sendAdminCredentialsEmail } from '../../services/emailService.js';
+import tokenService from '../../services/tokenService.js';
 
 // Raw SQL RBAC Login Controller
 export const login = async (req, res) => {
@@ -44,45 +45,74 @@ export const login = async (req, res) => {
     // Update last_login_at via raw SQL
     await db.query('UPDATE admin_users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
-    const roleName = USER_TYPES[user.user_type] || 'USER';
-    const permissions = ROLE_PERMISSIONS[user.user_type] || [];
-
-    // Issue JWT Token with RBAC claims
-    const payload = {
-      id: user.id,
-      email: user.email,
-      user_type: user.user_type,
-      role: roleName,
-      permissions,
-    };
-
-    const token = jwt.sign(
-      payload,
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-
-    const userObj = {
-      id: user.id,
-      name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Super Admin',
-      email: user.email,
-      user_type: user.user_type,
-      role: roleName,
-      permissions,
-      status: 'Active',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&q=80',
-    };
+    const tokenPair = await tokenService.generateTokenPair(user, 1, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
 
     return res.json({
       success: true,
       message: 'Login successful.',
-      token,
-      user: userObj,
+      token: tokenPair.accessToken,
+      refreshToken: tokenPair.refreshToken,
+      expiresIn: tokenPair.expiresIn,
+      user: tokenPair.user,
     });
   } catch (err) {
     console.error('Auth RBAC Login Controller Error:', err);
     return res.status(500).json({ success: false, message: 'Server error during login.' });
   }
+};
+
+/**
+ * POST /api/admin/auth/refresh
+ * Silent renewal for Admin Access Token via Refresh Token
+ */
+export const refreshSession = async (req, res) => {
+  try {
+    const rawRefreshToken = req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (!rawRefreshToken) {
+      return res.status(400).json({ success: false, message: 'Refresh token is required.' });
+    }
+
+    const newTokens = await tokenService.rotateRefreshToken(rawRefreshToken, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    return res.json({
+      success: true,
+      message: 'Token refreshed successfully.',
+      token: newTokens.accessToken,
+      refreshToken: newTokens.refreshToken,
+      expiresIn: newTokens.expiresIn,
+      user: newTokens.user,
+    });
+  } catch (err) {
+    const status = err.statusCode || 401;
+    return res.status(status).json({
+      success: false,
+      code: err.code || 'REFRESH_FAILED',
+      message: err.message || 'Failed to refresh token.',
+    });
+  }
+};
+
+/**
+ * POST /api/admin/auth/logout
+ * Revoke Admin Refresh Token
+ */
+export const logout = async (req, res) => {
+  try {
+    const rawRefreshToken = req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (rawRefreshToken) {
+      await tokenService.revokeRefreshToken(rawRefreshToken);
+    }
+    return res.json({ success: true, message: 'Logged out successfully.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Error during logout.' });
+  }
+};
 };
 
 // Raw SQL Get Me Controller

@@ -108,6 +108,23 @@ export async function initDb() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+
+    // 4c. refresh_tokens (Dual-Token Auth & Rotation)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id SERIAL PRIMARY KEY,
+        user_type SMALLINT NOT NULL DEFAULT 2,
+        user_id UUID NOT NULL,
+        token_hash VARCHAR(64) NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        revoked_at TIMESTAMPTZ DEFAULT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        user_agent TEXT,
+        ip_address VARCHAR(45)
+      );
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_type, user_id);
+    `);
     await db.query('CREATE INDEX IF NOT EXISTS idx_email_otps_email_purpose ON email_otps(email, purpose);');
 
     // 5. modules

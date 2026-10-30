@@ -1,6 +1,8 @@
 import express from 'express';
 import {
   login,
+  refreshSession,
+  logout,
   getMe,
   getAdminUsers,
   createAdminUser,
@@ -14,6 +16,8 @@ import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
 const router = express.Router();
 
 router.post('/login', login);
+router.post('/refresh', refreshSession);
+router.post('/logout', logout);
 router.get('/me', authenticateToken, requireAdmin, getMe);
 router.get('/admin-users', authenticateToken, requireAdmin, getAdminUsers);
 router.post('/admin-users', authenticateToken, requireAdmin, createAdminUser);
