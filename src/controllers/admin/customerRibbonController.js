@@ -1,6 +1,25 @@
 
 import db from '../../config/db.js';
 
+export async function ensureCustomerLogosTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS customer_logos (
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        logo_url TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        status SMALLINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+  } catch (err) {
+    console.warn('[Customer Logos] Schema check notice:', err.message);
+  }
+}
+ensureCustomerLogosTable();
+
 const CUSTOMER_LOGO_COLUMNS = `
   id,
   name,

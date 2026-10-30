@@ -102,6 +102,15 @@ export const placeOrder = async (req, res) => {
       }
 
       const prod = rows[0];
+      const currentStock = parseInt(prod.stock || 0, 10);
+      if (currentStock < qty) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          success: false,
+          message: `Insufficient stock for product "${prod.name}". Only ${currentStock} unit(s) available.`,
+        });
+      }
+
       const itemPrice = parseFloat(prod.price || 0);
       const lineTotal = itemPrice * qty;
       subtotal += lineTotal;
@@ -116,9 +125,9 @@ export const placeOrder = async (req, res) => {
         lineTotal,
       });
 
-      // Update product stock
+      // Update product stock safely
       await client.query(
-        'UPDATE products SET stock = GREATEST(0, stock - $1), updated_at = NOW() WHERE id = $2',
+        'UPDATE products SET stock = stock - $1, updated_at = NOW() WHERE id = $2',
         [qty, prod.id]
       );
     }
@@ -201,11 +210,12 @@ export const placeOrder = async (req, res) => {
       ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, delivery_date, created_at;
     `;
 
-    const finalStatus = req.body.status || 'Pending';
-    const finalPaymentStatus = req.body.paymentStatus || req.body.payment_status || (finalPaymentMethod === 'Razorpay' ? 'Paid' : 'Pending');
-    const rzpOrderId = req.body.razorpay_order_id || req.body.razorpayOrderId || null;
-    const rzpPaymentId = req.body.razorpay_payment_id || req.body.razorpayPaymentId || null;
-    const rzpSignature = req.body.razorpay_signature || req.body.razorpaySignature || null;
+    // Enforce server-side authoritative status (never trust client-supplied status or payment status)
+    const finalStatus = 'Pending';
+    const finalPaymentStatus = 'Pending';
+    const rzpOrderId = null;
+    const rzpPaymentId = null;
+    const rzpSignature = null;
 
     const requiresGstInvoice = Boolean(req.body.requires_gst_invoice || req.body.requiresGstInvoice);
     const customerGstin = requiresGstInvoice && req.body.customer_gstin ? String(req.body.customer_gstin).trim().toUpperCase() : null;

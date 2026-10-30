@@ -2,121 +2,284 @@
 import db from '../../config/db.js';
 
 // Get Public Store Products for Customer Browsing
+// export const getStoreProducts = async (req, res) => {
+//   try {
+//     const {
+//       category,
+//       search,
+//       brandId,
+//       sort = 'featured',
+//       is_kit,
+//       limit = 100,
+//       offset = 0,
+//     } = req.query;
+
+//     let queryText = `
+//       SELECT 
+//         p.id,
+//         p.name,
+//         p.slug,
+//         p.sku,
+//         p.category_id AS "categoryId",
+//         c.name AS "categoryName",
+//         c.slug AS "categorySlug",
+//         p.sub_category_id AS "subCategoryId",
+//         p.module_id AS "moduleId",
+// m.name AS "moduleName",
+//         sc.name AS "subCategoryName",
+//         p.brand_id AS "brandId",
+//         bl.name AS brand,
+//         bl.logo_url AS "brandLogoUrl",
+//         p.price,
+//         p.old_price AS "oldPrice",
+//         p.stock,
+//         COALESCE((SELECT ROUND(AVG(pr.rating), 1) FROM product_reviews pr WHERE pr.product_id = p.id AND pr.status = 1), 0.0) AS rating,
+//         COALESCE((SELECT COUNT(*)::int FROM product_reviews pr WHERE pr.product_id = p.id AND pr.status = 1), 0) AS "reviewsCount",
+//         p.is_featured AS "isFeatured",
+//         p.is_new AS "isNew",
+//         p.badge,
+//         p.is_kit AS "isKit",
+//         p.specifications,
+//         p.kit_discount_percentage AS "kitDiscountPercentage",
+//         (SELECT COUNT(*)::int FROM kit_items ki WHERE ki.kit_id = p.id) AS "componentsCount",
+//         p.image_url AS "image",
+//         p.images AS "images",
+//         p.description,
+//         p.created_at AS "createdAt",
+//         COUNT(*) OVER()::int AS "totalCount"
+//       FROM products p
+//       JOIN categories c ON p.category_id = c.id AND c.status = 1
+//       LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status = 1
+//       LEFT JOIN modules m
+//   ON p.module_id = m.id
+//   AND m.status = 1
+//       LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
+//       WHERE p.status = 1
+//     `;
+
+//     const params = [];
+
+//     // Filter by Category Slug or ID
+//     if (category && category !== 'all') {
+//       params.push(category);
+//       queryText += ` AND (c.slug = $${params.length} OR c.id::text = $${params.length})`;
+//     }
+
+//     // Filter by Kit / Single Product
+//     if (is_kit === 'true') {
+//       queryText += ' AND p.is_kit = true';
+//     } else if (is_kit === 'false') {
+//       queryText += ' AND p.is_kit = false';
+//     }
+
+//     // Filter by Search Term
+//     if (search && search.trim()) {
+//       params.push(`%${search.trim().toLowerCase()}%`);
+//       queryText += ` AND (
+//         LOWER(p.name) LIKE $${params.length} OR 
+//         LOWER(p.description) LIKE $${params.length} OR 
+//         LOWER(COALESCE(bl.name, '')) LIKE $${params.length} OR
+//         LOWER(c.name) LIKE $${params.length}
+//       )`;
+//     }
+
+//     // Filter by Brand ID
+//     if (brandId !== undefined && brandId !== '') {
+//       const parsedBrandId = parseInt(brandId, 10);
+
+//       if (Number.isNaN(parsedBrandId) || parsedBrandId <= 0) {
+//         return res.status(400).json({
+//           success: false,
+//           message: 'Invalid brandId.',
+//         });
+//       }
+
+//       params.push(parsedBrandId);
+//       queryText += ` AND p.brand_id = $${params.length}`;
+//     }
+
+//     // Sorting
+//     if (sort === 'price-low') {
+//       queryText += ' ORDER BY p.price ASC';
+//     } else if (sort === 'price-high') {
+//       queryText += ' ORDER BY p.price DESC';
+//     } else if (sort === 'rating') {
+//       queryText += ' ORDER BY p.rating DESC, p.reviews_count DESC';
+//     } else if (sort === 'newest') {
+//       queryText += ' ORDER BY p.id DESC';
+//     } else {
+//       // Default: featured first, then newest
+//       queryText += ' ORDER BY p.is_featured DESC, p.sort_order ASC, p.id DESC';
+//     }
+
+//     params.push(parseInt(limit, 10) || 100);
+//     queryText += ` LIMIT $${params.length}`;
+
+//     params.push(parseInt(offset, 10) || 0);
+//     queryText += ` OFFSET $${params.length}`;
+
+//     const { rows } = await db.query(queryText, params);
+
+//     const products = rows.map((p) => ({
+//       ...p,
+//       price: parseFloat(p.price || 0),
+//       oldPrice: p.oldPrice ? parseFloat(p.oldPrice) : null,
+//       rating: parseFloat(p.rating || 0),
+//       reviewsCount: parseInt(p.reviewsCount || 0, 10),
+//       image: p.image || '/products/product-electronics.png',
+//       images: Array.isArray(p.images)
+//         ? p.images
+//         : typeof p.images === 'string'
+//           ? JSON.parse(p.images)
+//           : p.image
+//             ? [p.image]
+//             : [],
+//       specifications:
+//         typeof p.specifications === 'object' && p.specifications !== null
+//           ? p.specifications
+//           : {},
+//     }));
+
+//     const totalCount =
+//       rows.length > 0 && rows[0].totalCount
+//         ? parseInt(rows[0].totalCount, 10)
+//         : 0;
+
+//     return res.json({
+//       success: true,
+//       totalCount,
+//       count: products.length,
+//       products,
+//     });
+//   } catch (err) {
+//     console.error('Store Products Controller Error:', err);
+//     return res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch catalog products.',
+//     });
+//   }
+// };
+
+const parseList = (v) =>
+  v == null || v === ''
+    ? []
+    : String(Array.isArray(v) ? v.join(',') : v)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+const parseIntList = (v) => parseList(v).map(Number).filter(Number.isInteger);
+
+const FROM_SQL = `
+  FROM products p
+  JOIN categories c ON p.category_id = c.id AND c.status = 1
+  LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status = 1
+  LEFT JOIN modules m ON p.module_id = m.id AND m.status = 1
+  LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
+  WHERE p.status = 1
+`;
+
+const SORTS = {
+  'price-low': 'p.price ASC, p.id DESC',
+  'price-asc': 'p.price ASC, p.id DESC',
+  'price-high': 'p.price DESC, p.id DESC',
+  'price-desc': 'p.price DESC, p.id DESC',
+  'name-asc': 'p.name ASC, p.id DESC',
+  rating: 'rating DESC, "reviewsCount" DESC, p.id DESC',
+  'rating-desc': 'rating DESC, "reviewsCount" DESC, p.id DESC',
+  newest: 'p.id DESC',
+  featured: 'p.is_featured DESC, p.sort_order ASC, p.id DESC',
+};
+
+// Builds the optional filter clauses. `exclude` skips one group (used for facet counts).
+function buildFilters(q, exclude = null) {
+  const clauses = [];
+  const params = [];
+  const add = (v) => (params.push(v), `$${params.length}`);
+
+  const categories = parseList(q.category).filter((c) => c !== 'all');
+  if (exclude !== 'category' && categories.length) {
+    const p = add(categories);
+    clauses.push(`(c.slug = ANY(${p}::text[]) OR c.id::text = ANY(${p}::text[]))`);
+  }
+
+  if (exclude !== 'module' && q.modules) {
+    clauses.push(`p.module_id = ANY(${add(parseIntList(q.modules))}::int[])`);
+  }
+
+  // `brands` (list) and legacy `brandId` (single) are merged
+  const brandIds = [...parseIntList(q.brands), ...parseIntList(q.brandId)];
+  if (exclude !== 'brand' && (q.brands || q.brandId)) {
+    clauses.push(`p.brand_id = ANY(${add(brandIds)}::int[])`);
+  }
+
+  if (exclude !== 'price') {
+    if (q.minPrice !== undefined && q.minPrice !== '' && !Number.isNaN(Number(q.minPrice))) {
+      clauses.push(`p.price >= ${add(Number(q.minPrice))}`);
+    }
+    if (q.maxPrice !== undefined && q.maxPrice !== '' && !Number.isNaN(Number(q.maxPrice))) {
+      clauses.push(`p.price <= ${add(Number(q.maxPrice))}`);
+    }
+  }
+
+  if (q.is_kit === 'true') clauses.push('p.is_kit = true');
+  else if (q.is_kit === 'false') clauses.push('p.is_kit = false');
+
+  if (q.search && q.search.trim()) {
+    const p = add(`%${q.search.trim().toLowerCase()}%`);
+    clauses.push(`(
+      LOWER(p.name) LIKE ${p} OR
+      LOWER(p.description) LIKE ${p} OR
+      LOWER(COALESCE(bl.name, '')) LIKE ${p} OR
+      LOWER(c.name) LIKE ${p}
+    )`);
+  }
+
+  return { sql: clauses.map((c) => ` AND ${c}`).join(''), params };
+}
+
 export const getStoreProducts = async (req, res) => {
   try {
-    const {
-      category,
-      search,
-      brandId,
-      sort = 'featured',
-      is_kit,
-      limit = 100,
-      offset = 0,
-    } = req.query;
+    const q = req.query;
+    const { sort = 'featured', limit = 100, offset = 0 } = q;
 
-    let queryText = `
-      SELECT 
-        p.id,
-        p.name,
-        p.slug,
-        p.sku,
-        p.category_id AS "categoryId",
-        c.name AS "categoryName",
-        c.slug AS "categorySlug",
-        p.sub_category_id AS "subCategoryId",
-        p.module_id AS "moduleId",
-m.name AS "moduleName",
-        sc.name AS "subCategoryName",
-        p.brand_id AS "brandId",
-        bl.name AS brand,
-        bl.logo_url AS "brandLogoUrl",
-        p.price,
-        p.old_price AS "oldPrice",
-        p.stock,
+    // Keep the old 400 for a malformed legacy brandId
+    if (q.brandId !== undefined && q.brandId !== '') {
+      const parsed = parseInt(q.brandId, 10);
+      if (Number.isNaN(parsed) || parsed <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid brandId.' });
+      }
+    }
+
+    const { sql: filterSql, params } = buildFilters(q);
+    const orderBy = SORTS[sort] || SORTS.featured;
+
+    const add = (v) => (params.push(v), `$${params.length}`);
+    const limitP = add(parseInt(limit, 10) || 100);
+    const offsetP = add(parseInt(offset, 10) || 0);
+
+    const queryText = `
+      SELECT
+        p.id, p.name, p.slug, p.sku,
+        p.category_id AS "categoryId", c.name AS "categoryName", c.slug AS "categorySlug",
+        p.sub_category_id AS "subCategoryId", sc.name AS "subCategoryName",
+        p.module_id AS "moduleId", m.name AS "moduleName",
+        p.brand_id AS "brandId", bl.name AS brand, bl.logo_url AS "brandLogoUrl",
+        p.price, p.old_price AS "oldPrice", p.stock,
         COALESCE((SELECT ROUND(AVG(pr.rating), 1) FROM product_reviews pr WHERE pr.product_id = p.id AND pr.status = 1), 0.0) AS rating,
         COALESCE((SELECT COUNT(*)::int FROM product_reviews pr WHERE pr.product_id = p.id AND pr.status = 1), 0) AS "reviewsCount",
-        p.is_featured AS "isFeatured",
-        p.is_new AS "isNew",
-        p.badge,
-        p.is_kit AS "isKit",
-        p.specifications,
+        p.is_featured AS "isFeatured", p.is_new AS "isNew", p.badge,
+        p.is_kit AS "isKit", p.specifications,
         p.kit_discount_percentage AS "kitDiscountPercentage",
         (SELECT COUNT(*)::int FROM kit_items ki WHERE ki.kit_id = p.id) AS "componentsCount",
-        p.image_url AS "image",
-        p.images AS "images",
-        p.description,
-        p.created_at AS "createdAt",
+        p.image_url AS "image", p.images AS "images",
+        p.description, p.created_at AS "createdAt",
         COUNT(*) OVER()::int AS "totalCount"
-      FROM products p
-      JOIN categories c ON p.category_id = c.id AND c.status = 1
-      LEFT JOIN subcategories sc ON p.sub_category_id = sc.id AND sc.status = 1
-      LEFT JOIN modules m
-  ON p.module_id = m.id
-  AND m.status = 1
-      LEFT JOIN public.brand_logos bl ON p.brand_id = bl.id
-      WHERE p.status = 1
+      ${FROM_SQL}
+      ${filterSql}
+      ORDER BY ${orderBy}
+      LIMIT ${limitP} OFFSET ${offsetP}
     `;
-
-    const params = [];
-
-    // Filter by Category Slug or ID
-    if (category && category !== 'all') {
-      params.push(category);
-      queryText += ` AND (c.slug = $${params.length} OR c.id::text = $${params.length})`;
-    }
-
-    // Filter by Kit / Single Product
-    if (is_kit === 'true') {
-      queryText += ' AND p.is_kit = true';
-    } else if (is_kit === 'false') {
-      queryText += ' AND p.is_kit = false';
-    }
-
-    // Filter by Search Term
-    if (search && search.trim()) {
-      params.push(`%${search.trim().toLowerCase()}%`);
-      queryText += ` AND (
-        LOWER(p.name) LIKE $${params.length} OR 
-        LOWER(p.description) LIKE $${params.length} OR 
-        LOWER(COALESCE(bl.name, '')) LIKE $${params.length} OR
-        LOWER(c.name) LIKE $${params.length}
-      )`;
-    }
-
-    // Filter by Brand ID
-    if (brandId !== undefined && brandId !== '') {
-      const parsedBrandId = parseInt(brandId, 10);
-
-      if (Number.isNaN(parsedBrandId) || parsedBrandId <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid brandId.',
-        });
-      }
-
-      params.push(parsedBrandId);
-      queryText += ` AND p.brand_id = $${params.length}`;
-    }
-
-    // Sorting
-    if (sort === 'price-low') {
-      queryText += ' ORDER BY p.price ASC';
-    } else if (sort === 'price-high') {
-      queryText += ' ORDER BY p.price DESC';
-    } else if (sort === 'rating') {
-      queryText += ' ORDER BY p.rating DESC, p.reviews_count DESC';
-    } else if (sort === 'newest') {
-      queryText += ' ORDER BY p.id DESC';
-    } else {
-      // Default: featured first, then newest
-      queryText += ' ORDER BY p.is_featured DESC, p.sort_order ASC, p.id DESC';
-    }
-
-    params.push(parseInt(limit, 10) || 100);
-    queryText += ` LIMIT $${params.length}`;
-
-    params.push(parseInt(offset, 10) || 0);
-    queryText += ` OFFSET $${params.length}`;
 
     const { rows } = await db.query(queryText, params);
 
@@ -131,32 +294,51 @@ m.name AS "moduleName",
         ? p.images
         : typeof p.images === 'string'
           ? JSON.parse(p.images)
-          : p.image
-            ? [p.image]
-            : [],
+          : p.image ? [p.image] : [],
       specifications:
-        typeof p.specifications === 'object' && p.specifications !== null
-          ? p.specifications
-          : {},
+        typeof p.specifications === 'object' && p.specifications !== null ? p.specifications : {},
     }));
 
-    const totalCount =
-      rows.length > 0 && rows[0].totalCount
-        ? parseInt(rows[0].totalCount, 10)
-        : 0;
+    const totalCount = rows.length > 0 && rows[0].totalCount ? parseInt(rows[0].totalCount, 10) : 0;
 
-    return res.json({
-      success: true,
-      totalCount,
-      count: products.length,
-      products,
-    });
+    const response = { success: true, totalCount, count: products.length, products };
+
+    // Optional facets: option counts ignore their own group, price ignores price
+    if (q.includeFacets === '1' || q.includeFacets === 'true') {
+      const facet = (group, select, groupBy, notNull) => {
+        const f = buildFilters(q, group);
+        return db.query(
+          `SELECT ${select}, COUNT(*)::int AS count
+           ${FROM_SQL} ${f.sql} ${notNull ? `AND ${notNull} IS NOT NULL` : ''}
+           GROUP BY ${groupBy} ORDER BY name`,
+          f.params
+        );
+      };
+      const pf = buildFilters(q, 'price');
+
+      const [cats, mods, brands, price] = await Promise.all([
+        facet('category', 'c.id, c.name, c.slug', 'c.id, c.name, c.slug'),
+        facet('module', 'm.id, m.name', 'm.id, m.name', 'm.id'),
+        facet('brand', 'bl.id, bl.name', 'bl.id, bl.name', 'bl.id'),
+        db.query(
+          `SELECT FLOOR(MIN(p.price))::int AS min, CEIL(MAX(p.price))::int AS max
+           ${FROM_SQL} ${pf.sql}`,
+          pf.params
+        ),
+      ]);
+
+      response.facets = {
+        categories: cats.rows,
+        modules: mods.rows,
+        brands: brands.rows,
+        price: { min: price.rows[0]?.min ?? 0, max: price.rows[0]?.max ?? 0 },
+      };
+    }
+
+    return res.json(response);
   } catch (err) {
     console.error('Store Products Controller Error:', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch catalog products.',
-    });
+    return res.status(500).json({ success: false, message: 'Failed to fetch catalog products.' });
   }
 };
 

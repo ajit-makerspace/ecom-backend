@@ -17,9 +17,9 @@ const router = express.Router();
 // Public Customer Shipping TAT / Serviceability
 router.get('/shipping/tat', getShippingTat);
 
-// Public / Admin label viewer
-router.get('/admin/shipping/view-label/:orderId', renderShippingLabel);
-router.get('/admin/shipping/view-label', renderShippingLabel);
+// Protected Admin Shipping Label Viewer
+router.get('/admin/shipping/view-label/:orderId', authenticateToken, requireAdmin, renderShippingLabel);
+router.get('/admin/shipping/view-label', authenticateToken, requireAdmin, renderShippingLabel);
 
 // Protected Admin Routes
 router.get('/admin/shipping/config', authenticateToken, requireAdmin, getShippingConfig);
@@ -30,7 +30,7 @@ router.post('/admin/shipping/generate-label/:orderId', authenticateToken, requir
 router.get('/admin/shipping/track/:orderId', authenticateToken, requireAdmin, trackShipment);
 router.post('/admin/shipping/cancel/:orderId', authenticateToken, requireAdmin, cancelShipment);
 
-// Customer Shipment Tracking
-router.get('/user/orders/:orderId/track', trackShipment);
+// Customer Shipment Tracking (requires authentication & ownership verification)
+router.get('/user/orders/:orderId/track', authenticateToken, trackShipment);
 
 export default router;

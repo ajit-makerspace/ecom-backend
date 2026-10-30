@@ -2195,13 +2195,19 @@ const { rows } = await db.query(`
         prod.specifications !== null
           ? prod.specifications
           : {},
-      images: Array.isArray(prod.images)
-        ? prod.images
-        : typeof prod.images === 'string'
-          ? JSON.parse(prod.images)
-          : prod.image
-            ? [prod.image]
-            : [],
+      images: (() => {
+        if (Array.isArray(prod.images)) return prod.images;
+        if (typeof prod.images === 'string') {
+          try {
+            const parsed = JSON.parse(prod.images);
+            if (Array.isArray(parsed)) return parsed;
+            if (parsed) return [parsed];
+          } catch {
+            return prod.images.split(',').map((s) => s.trim()).filter(Boolean);
+          }
+        }
+        return prod.image ? [prod.image] : [];
+      })(),
       kitItems: prod.kitItems || [],
     }));
 

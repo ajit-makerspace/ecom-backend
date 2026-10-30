@@ -6,7 +6,10 @@ import { JWT_SECRET } from '../config/jwt.js';
 // Universal Authentication JWT Token Verification
 export async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  let token = authHeader && authHeader.split(' ')[1];
+  if (!token && req.query && req.query.token) {
+    token = String(req.query.token);
+  }
 
   if (!token) {
     return res.status(401).json({ success: false, message: 'Authentication required. No token provided.' });

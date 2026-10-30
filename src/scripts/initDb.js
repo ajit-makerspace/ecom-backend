@@ -104,6 +104,7 @@ export async function initDb() {
         purpose VARCHAR(50) NOT NULL DEFAULT 'login',
         expires_at TIMESTAMPTZ NOT NULL,
         is_used BOOLEAN NOT NULL DEFAULT FALSE,
+        attempts INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
@@ -143,6 +144,7 @@ export async function initDb() {
     `);
     await db.query('ALTER TABLE categories ADD COLUMN IF NOT EXISTS code VARCHAR(4);');
     await db.query('ALTER TABLE categories ADD COLUMN IF NOT EXISTS module_id INTEGER;');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_categories_module_id ON categories(module_id);');
 
     // 7. subcategories
     await db.query(`
@@ -201,6 +203,8 @@ export async function initDb() {
     await db.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate NUMERIC(5, 2);');
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);');
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_is_kit ON products(is_kit);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_products_cat_subcat ON products(category_id, sub_category_id);');
 
     // 8b. kit_items (Links kits to constituent products with quantities & specifications)
     await db.query(`
@@ -236,7 +240,7 @@ export async function initDb() {
         tax NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
         total_amount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
         status VARCHAR(50) NOT NULL DEFAULT 'Pending',
-        payment_status VARCHAR(50) NOT NULL DEFAULT 'Paid',
+        payment_status VARCHAR(50) NOT NULL DEFAULT 'Pending',
         payment_method VARCHAR(50) NOT NULL DEFAULT 'Credit Card',
         notes TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -270,6 +274,8 @@ export async function initDb() {
     await db.query("UPDATE orders SET delivery_date = updated_at WHERE LOWER(status) = 'delivered' AND delivery_date IS NULL;");
     await db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_invoice_number ON orders(invoice_number) WHERE invoice_number IS NOT NULL;');
     await db.query('CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_orders_customer_email ON orders(LOWER(customer_email));');
+    await db.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_razorpay_payment_id ON orders(razorpay_payment_id) WHERE razorpay_payment_id IS NOT NULL;');
 
     // 10. order_items
     await db.query(`
@@ -287,6 +293,7 @@ export async function initDb() {
       );
     `);
     await db.query('CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id);');
 
     // 10b. payments
     await db.query(`
@@ -423,6 +430,42 @@ export async function initDb() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         CONSTRAINT uq_cart_items_cart_product UNIQUE (cart_id, product_id)
+      );
+    `);
+
+    // 16. media_files (Hybrid FTP / Local Storage without database blobs)
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS media_files (
+        id SERIAL PRIMARY KEY,
+        filename VARCHAR(255) NOT NULL,
+        original_name VARCHAR(255),
+        mime_type VARCHAR(100) NOT NULL,
+        file_size INTEGER NOT NULL,
+        folder VARCHAR(100) NOT NULL DEFAULT 'general',
+        storage_type VARCHAR(50) NOT NULL DEFAULT 'local',
+        storage_path TEXT,
+        data BYTEA,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await db.query('ALTER TABLE media_files ADD COLUMN IF NOT EXISTS storage_type VARCHAR(50) NOT NULL DEFAULT \'local\';');
+    await db.query('ALTER TABLE media_files ADD COLUMN IF NOT EXISTS storage_path TEXT;');
+    await db.query('ALTER TABLE media_files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();');
+    await db.query('ALTER TABLE media_files ALTER COLUMN data DROP NOT NULL;');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_media_files_storage_type ON media_files(storage_type);');
+    await db.query('CREATE INDEX IF NOT EXISTS idx_media_files_filename ON media_files(filename);');
+
+    // 17. customer_logos
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS customer_logos (
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        logo_url TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        status SMALLINT NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
 

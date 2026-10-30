@@ -23,19 +23,14 @@ function getStandardAttachments() {
   return [];
 }
 
-// Initialize Transporter using Makerspace Masters SMTP Credentials
+// Initialize Transporter using Makerspace Masters SMTP Credentials from Environment
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp.gmail.com',
   port: parseInt(process.env.SMTP_PORT || '587', 10),
-  secure: false, // true for 465, false for 587 with STARTTLS
-  requireTLS: true,
+  secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587
   auth: {
-    user: process.env.SMTP_USER || 'atin.d@makerspacemasters.com',
-    pass: process.env.SMTP_PASS || 'cntf qdsh efjv rver',
-  },
-  tls: {
-    ciphers: 'SSLv3',
-    rejectUnauthorized: false,
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
   },
 });
 
