@@ -1,7 +1,8 @@
 import express from 'express';
 import { multerUpload, handleSingleUpload, handleBase64Upload } from '../controllers/uploadController.js';
-import { authenticateToken } from '../middleware/auth.js';
 import ftpService from '../services/ftpStorageService.js';
+import storageService from '../services/storageService.js';
+import { runFtpSync } from '../services/ftpSyncCron.js';
 
 const router = express.Router();
 
@@ -53,5 +54,39 @@ const getFtpStatusHandler = async (req, res) => {
 
 router.get('/ftp-status', getFtpStatusHandler);
 router.get('/upload/ftp-status', getFtpStatusHandler);
+
+// Trigger manual FTP synchronization for pending local files
+const handleFtpSync = async (req, res) => {
+  try {
+    const result = await runFtpSync();
+    return res.json({
+      success: true,
+      message: 'FTP synchronization cycle finished.',
+      result,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to trigger FTP sync.',
+    });
+  }
+};
+
+router.post('/upload/sync-ftp', handleFtpSync);
+router.get('/upload/sync-ftp', handleFtpSync);
+router.post('/admin/storage/sync-ftp', handleFtpSync);
+
+// Detailed storage status & diagnostics
+router.get('/storage-status', async (req, res) => {
+  try {
+    const diagnostics = await storageService.getStorageDiagnostics();
+    return res.json({ success: true, ...diagnostics });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to load storage diagnostics',
+    });
+  }
+});
 
 export default router;
