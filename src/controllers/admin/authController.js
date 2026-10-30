@@ -113,7 +113,6 @@ export const logout = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Error during logout.' });
   }
 };
-};
 
 // Raw SQL Get Me Controller
 export const getMe = async (req, res) => {
