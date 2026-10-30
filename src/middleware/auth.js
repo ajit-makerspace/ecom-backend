@@ -79,8 +79,19 @@ export async function authenticateToken(req, res, next) {
     };
     return next();
   } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        code: 'TOKEN_EXPIRED',
+        message: 'Access token expired.',
+      });
+    }
     console.error('[Auth Error in authenticateToken]:', err.message);
-    return res.status(403).json({ success: false, message: 'Invalid or expired session token.' });
+    return res.status(401).json({
+      success: false,
+      code: 'TOKEN_INVALID',
+      message: 'Invalid or expired session token.',
+    });
   }
 }
 
