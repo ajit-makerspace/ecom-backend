@@ -40,7 +40,7 @@ export async function authenticateToken(req, res, next) {
       if (userRows.length === 0) {
         const insertUser = await db.query(
           `INSERT INTO users (email, password_hash, first_name, last_name, phone, status, role, created_at, updated_at)
-           VALUES ($1, 'LINKED_ADMIN', $2, $3, $4, 1, 'Customer', NOW(), NOW())
+           VALUES ($1, 'LINKED_ADMIN', $2, $3, $4, 1, 1, NOW(), NOW())
            RETURNING id, email, first_name, last_name, phone, role, status`,
           [adminUser.email, adminUser.first_name || 'Admin', adminUser.last_name || 'User', '']
         );
@@ -79,6 +79,7 @@ export async function authenticateToken(req, res, next) {
     };
     return next();
   } catch (err) {
+    console.error('[Auth Error in authenticateToken]:', err.message);
     return res.status(403).json({ success: false, message: 'Invalid or expired session token.' });
   }
 }
@@ -111,7 +112,7 @@ export async function optionalAuth(req, res, next) {
         if (userRows.length === 0) {
           const insertUser = await db.query(
             `INSERT INTO users (email, password_hash, first_name, last_name, phone, status, role, created_at, updated_at)
-             VALUES ($1, 'LINKED_ADMIN', $2, $3, $4, 1, 'Customer', NOW(), NOW())
+             VALUES ($1, 'LINKED_ADMIN', $2, $3, $4, 1, 1, NOW(), NOW())
              RETURNING id, email, first_name, last_name, phone, role, status`,
             [adminUser.email, adminUser.first_name || 'Admin', adminUser.last_name || 'User', adminUser.phone || '']
           );
