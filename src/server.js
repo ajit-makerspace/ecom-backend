@@ -158,7 +158,7 @@ app.get('/api/media/:id', async (req, res) => {
 // Serve static uploads directly from backend uploads folder (including nested products/robu, brands, banners, etc.)
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-// Database Upload Resolver: streams any /uploads/* from PostgreSQL product_images & media_files if not found on disk
+// Database & FTP Upload Resolver: streams any /uploads/* from PostgreSQL product_images, media_files or FTP server if not found on disk
 app.get('/uploads/*', async (req, res, next) => {
   try {
     const rawPath = req.params[0] || '';
@@ -171,7 +171,7 @@ app.get('/uploads/*', async (req, res, next) => {
       [filename]
     );
 
-    if (prodImgRes.rows.length > 0) {
+    if (prodImgRes.rows.length > 0 && prodImgRes.rows[0].data) {
       res.setHeader('Content-Type', prodImgRes.rows[0].mime_type || 'image/jpeg');
       res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
       return res.end(prodImgRes.rows[0].data);
@@ -199,9 +199,66 @@ app.get('/uploads/*', async (req, res, next) => {
       }
     }
 
-    return res.status(404).send('Image not found in backend or database');
+    // 3. Fallback: Check directly on FTP Server at /ecom/${rawPath} (e.g. /ecom/products/robu/..., /ecom/brands/..., /ecom/banners/...)
+    if (ftpService.isFtpConfigured()) {
+      try {
+        const baseDir = ftpService.getFtpBaseDir();
+        // Support both direct path (/ecom/products/robu/...) and nested uploads path (/ecom/uploads/...)
+        const remotePath = path.posix.join(baseDir, rawPath);
+        let data = null;
+        try {
+          data = await ftpService.downloadBuffer(remotePath);
+        } catch {
+          const altPath = path.posix.join(baseDir, 'uploads', rawPath);
+          data = await ftpService.downloadBuffer(altPath).catch(() => null);
+        }
+
+        if (data && data.length > 0) {
+          const ext = path.extname(filename).toLowerCase();
+          const mimeTypes = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.webp': 'image/webp',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.mp4': 'video/mp4',
+            '.webm': 'video/webm',
+            '.ogg': 'video/ogg',
+            '.pdf': 'application/pdf',
+          };
+          const mimeType = mimeTypes[ext] || 'application/octet-stream';
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+
+          // Handle HTTP Range header for video files
+          const rangeHeader = req.headers.range;
+          if (rangeHeader && mimeType.startsWith('video/')) {
+            const totalSize = data.length;
+            const parts = rangeHeader.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+            if (start < totalSize && end < totalSize) {
+              const chunkSize = end - start + 1;
+              res.status(206);
+              res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+              res.setHeader('Content-Length', chunkSize);
+              return res.end(data.subarray(start, end + 1));
+            }
+          }
+
+          res.setHeader('Content-Length', data.length);
+          return res.end(data);
+        }
+      } catch (ftpFallbackErr) {
+        // Continue to 404
+      }
+    }
+
+    return res.status(404).send('Image not found in backend, database, or FTP server');
   } catch (err) {
-    console.error('Database Upload Stream Error:', err);
+    console.error('Database/FTP Upload Stream Error:', err);
     next(err);
   }
 });
