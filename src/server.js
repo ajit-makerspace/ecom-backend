@@ -179,7 +179,10 @@ app.get(['/api/product-images/:id', '/api/product-images/file/:filename'], async
       }
     } catch {}
 
-    return res.status(404).send('Product image not found');
+    const placeholderSvg = Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="100%" height="100%" fill="#f8fafc" rx="8" stroke="#e2e8f0" stroke-width="1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#94a3b8">Product Image</text></svg>`
+    );
+    return sendFileBuffer(res, placeholderSvg, 'product-placeholder.svg', req.headers.range, 'image/svg+xml');
   } catch (err) {
     console.error('Serve Product Image Error:', err);
     return res.status(500).send('Error loading product image');
@@ -204,7 +207,10 @@ app.get('/api/media/:id', async (req, res) => {
         const data = await fs.promises.readFile(directLocalPath);
         return sendFileBuffer(res, data, id, req.headers.range);
       }
-      return res.status(404).send('Media not found in storage or database');
+      const placeholderSvg = Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="60" viewBox="0 0 180 60"><rect width="100%" height="100%" fill="#f8fafc" rx="6" stroke="#e2e8f0" stroke-width="1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#94a3b8">Not Found</text></svg>`
+      );
+      return sendFileBuffer(res, placeholderSvg, 'not-found.svg', req.headers.range, 'image/svg+xml');
     }
 
     const file = rows[0];
@@ -223,7 +229,15 @@ app.get('/api/media/:id', async (req, res) => {
     }
 
     if (!data) {
-      return res.status(404).send('Media data not available');
+      // Graceful SVG placeholder fallback to prevent Next.js image optimizer "received null" crash
+      const label = file.filename
+        ? file.filename.replace(/^brand-/, '').replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
+        : 'Image';
+      const cleanLabel = (label.charAt(0).toUpperCase() + label.slice(1)).slice(0, 24);
+      const placeholderSvg = Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="60" viewBox="0 0 180 60"><rect width="100%" height="100%" fill="#f8fafc" rx="6" stroke="#e2e8f0" stroke-width="1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#64748b">${cleanLabel}</text></svg>`
+      );
+      return sendFileBuffer(res, placeholderSvg, `${file.filename || id}.svg`, req.headers.range, 'image/svg+xml');
     }
 
     return sendFileBuffer(res, data, file.filename, req.headers.range, file.mime_type);
