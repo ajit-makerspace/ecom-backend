@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import db from '../../config/db.js';
@@ -331,13 +332,13 @@ export const sendLoginOtp = async (req, res) => {
       [cleanEmail]
     );
 
-    // Generate secure 6-digit OTP code
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate cryptographically secure 6-digit OTP code (SEC-06)
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
 
-    // Insert new OTP with 10-minute expiry
+    // Insert new OTP with 10-minute expiry and zero attempts
     await db.query(
-      `INSERT INTO email_otps (email, otp_code, purpose, expires_at)
-       VALUES ($1, $2, 'login', NOW() + INTERVAL '10 minutes')`,
+      `INSERT INTO email_otps (email, otp_code, purpose, attempts, expires_at)
+       VALUES ($1, $2, 'login', 0, NOW() + INTERVAL '10 minutes')`,
       [cleanEmail, otpCode]
     );
 
@@ -377,14 +378,14 @@ export const verifyLoginOtp = async (req, res) => {
     const cleanEmail = String(email).toLowerCase().trim();
     const cleanOtp = String(otp).trim();
 
-    // Verify OTP from database
+    // Fetch active OTP for rate-limiting & brute force checks (SEC-06)
     const { rows: otpRows } = await db.query(
-      `SELECT id, expires_at, is_used
+      `SELECT id, otp_code, attempts, expires_at
        FROM email_otps
-       WHERE LOWER(email) = $1 AND otp_code = $2 AND purpose = 'login' AND is_used = false AND expires_at > NOW()
+       WHERE LOWER(email) = $1 AND purpose = 'login' AND is_used = false AND expires_at > NOW()
        ORDER BY created_at DESC
        LIMIT 1`,
-      [cleanEmail, cleanOtp]
+      [cleanEmail]
     );
 
     if (otpRows.length === 0) {
@@ -394,8 +395,40 @@ export const verifyLoginOtp = async (req, res) => {
       });
     }
 
+    const activeOtp = otpRows[0];
+
+    // Enforce 5-attempt limit
+    if (activeOtp.attempts >= 5) {
+      await db.query('UPDATE email_otps SET is_used = true WHERE id = $1', [activeOtp.id]);
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed verification attempts. Please request a new code.',
+      });
+    }
+
+    if (activeOtp.otp_code !== cleanOtp) {
+      const nextAttempts = activeOtp.attempts + 1;
+      const isExhausted = nextAttempts >= 5;
+      await db.query(
+        'UPDATE email_otps SET attempts = $1, is_used = $2 WHERE id = $3',
+        [nextAttempts, isExhausted, activeOtp.id]
+      );
+
+      if (isExhausted) {
+        return res.status(429).json({
+          success: false,
+          message: 'Too many failed verification attempts. This code has been deactivated. Please request a new code.',
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: `Invalid verification code. ${5 - nextAttempts} attempts remaining.`,
+      });
+    }
+
     // Mark OTP as used
-    await db.query('UPDATE email_otps SET is_used = true WHERE id = $1', [otpRows[0].id]);
+    await db.query('UPDATE email_otps SET is_used = true WHERE id = $1', [activeOtp.id]);
 
     // Check if user already exists
     const { rows: userRows } = await db.query(
@@ -418,7 +451,7 @@ export const verifyLoginOtp = async (req, res) => {
       // Auto-create customer account on first successful OTP login
       const autoFirstName = cleanEmail.split('@')[0];
       const saltRounds = 10;
-      const placeholderHash = await bcrypt.hash(Math.random().toString(36) + Date.now().toString(), saltRounds);
+      const placeholderHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), saltRounds);
 
       const { rows: newRows } = await db.query(
         `INSERT INTO users (
@@ -500,11 +533,12 @@ export const sendPasswordResetOtp = async (req, res) => {
       [cleanEmail]
     );
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate cryptographically secure 6-digit OTP code (SEC-06)
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
 
     await db.query(
-      `INSERT INTO email_otps (email, otp_code, purpose, expires_at)
-       VALUES ($1, $2, 'reset_password', NOW() + INTERVAL '10 minutes')`,
+      `INSERT INTO email_otps (email, otp_code, purpose, attempts, expires_at)
+       VALUES ($1, $2, 'reset_password', 0, NOW() + INTERVAL '10 minutes')`,
       [cleanEmail, otpCode]
     );
 
@@ -539,18 +573,52 @@ export const resetPasswordWithOtp = async (req, res) => {
     const cleanEmail = String(email).toLowerCase().trim();
     const cleanOtp = String(otp).trim();
 
+    // Fetch active password reset OTP for brute-force verification (SEC-06)
     const { rows: otpRows } = await db.query(
-      `SELECT id FROM email_otps
-       WHERE LOWER(email) = $1 AND otp_code = $2 AND purpose = 'reset_password' AND is_used = false AND expires_at > NOW()
+      `SELECT id, otp_code, attempts, expires_at
+       FROM email_otps
+       WHERE LOWER(email) = $1 AND purpose = 'reset_password' AND is_used = false AND expires_at > NOW()
        ORDER BY created_at DESC LIMIT 1`,
-      [cleanEmail, cleanOtp]
+      [cleanEmail]
     );
 
     if (otpRows.length === 0) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired password reset code.' });
+      return res.status(400).json({ success: false, message: 'Invalid or expired password reset code. Please request a new code.' });
     }
 
-    await db.query('UPDATE email_otps SET is_used = true WHERE id = $1', [otpRows[0].id]);
+    const activeOtp = otpRows[0];
+
+    // Enforce 5-attempt limit
+    if (activeOtp.attempts >= 5) {
+      await db.query('UPDATE email_otps SET is_used = true WHERE id = $1', [activeOtp.id]);
+      return res.status(429).json({
+        success: false,
+        message: 'Too many failed verification attempts. Please request a new reset code.',
+      });
+    }
+
+    if (activeOtp.otp_code !== cleanOtp) {
+      const nextAttempts = activeOtp.attempts + 1;
+      const isExhausted = nextAttempts >= 5;
+      await db.query(
+        'UPDATE email_otps SET attempts = $1, is_used = $2 WHERE id = $3',
+        [nextAttempts, isExhausted, activeOtp.id]
+      );
+
+      if (isExhausted) {
+        return res.status(429).json({
+          success: false,
+          message: 'Too many failed verification attempts. This reset code has been deactivated. Please request a new one.',
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: `Invalid password reset code. ${5 - nextAttempts} attempts remaining.`,
+      });
+    }
+
+    await db.query('UPDATE email_otps SET is_used = true WHERE id = $1', [activeOtp.id]);
 
     const passwordHash = await bcrypt.hash(String(newPassword).trim(), 10);
     await db.query(

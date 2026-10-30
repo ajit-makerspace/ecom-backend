@@ -428,6 +428,8 @@ export const trackShipment = async (req, res) => {
     const { rows } = await db.query(
       `SELECT 
         o.id,
+        o.user_id,
+        o.customer_email,
         o.order_number AS "orderNumber",
         o.status AS "orderStatus",
         o.customer_name AS "customerName",
@@ -452,6 +454,23 @@ export const trackShipment = async (req, res) => {
     }
 
     const order = rows[0];
+
+    // SEC-05: Customer ownership and RBAC enforcement
+    const isAdmin = req.user?.user_type === 1 || req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'Admin';
+    if (!isAdmin) {
+      const currentUserId = req.user?.id ? Number(req.user.id) : null;
+      const currentUserEmail = req.user?.email ? String(req.user.email).trim().toLowerCase() : null;
+      const orderUserId = order.user_id ? Number(order.user_id) : null;
+      const orderEmail = order.customer_email ? String(order.customer_email).trim().toLowerCase() : null;
+
+      const isOwner = (currentUserId && orderUserId === currentUserId) || (currentUserEmail && orderEmail && orderEmail === currentUserEmail);
+      if (!isOwner) {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not authorized to view tracking for this order.',
+        });
+      }
+    }
 
     if (!order.awbCode && !order.shiprocketShipmentId) {
       return res.json({

@@ -7,7 +7,7 @@ import { createJimp } from '@jimp/core';
 import { defaultFormats, defaultPlugins } from 'jimp';
 import webpFormat from '@jimp/wasm-webp';
 import db from '../config/db.js';
-import ftpService from '../services/ftpStorageService.js';
+import storageService from '../services/storageService.js';
 
 // Polyfill Node.js fetch for local wasm files needed by @jsquash/webp in Jimp
 if (typeof globalThis.fetch === 'function') {
@@ -41,6 +41,8 @@ const ALLOWED_MIME_TYPES = {
   'image/tiff': '.tiff',
   'image/bmp': '.bmp',
   'image/x-ms-bmp': '.bmp',
+  'image/pjpeg': '.jpg',
+  'image/x-png': '.png',
   'application/pdf': '.pdf',
   // Video (banners only, enforced in handleSingleUpload)
   'video/mp4': '.mp4',
@@ -48,7 +50,7 @@ const ALLOWED_MIME_TYPES = {
   'video/ogg': '.ogg',
 };
 
-// MIME types that should be automatically converted to WebP
+// All raster image MIME types that must be converted to WebP format
 const CONVERTIBLE_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
   'image/jpg',
@@ -58,12 +60,14 @@ const CONVERTIBLE_IMAGE_MIME_TYPES = new Set([
   'image/tiff',
   'image/bmp',
   'image/x-ms-bmp',
+  'image/pjpeg',
+  'image/x-png',
 ]);
 
 const VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/ogg']);
 const VIDEO_ALLOWED_FOLDERS = new Set(['banners']);
 
-const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB for images / PDFs (unchanged)
+const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB for images / PDFs
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB for videos
 
 /**
@@ -75,7 +79,10 @@ const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB for videos
  * @returns {Promise<{ buffer: Buffer, mimeType: string, ext: string, isConverted: boolean }>}
  */
 export const convertToWebp = async (buffer, mimeType) => {
-  if (!CONVERTIBLE_IMAGE_MIME_TYPES.has(mimeType)) {
+  const isRasterImage = CONVERTIBLE_IMAGE_MIME_TYPES.has(mimeType) || 
+    (mimeType.startsWith('image/') && mimeType !== 'image/svg+xml');
+
+  if (!isRasterImage) {
     return {
       buffer,
       mimeType,
@@ -95,11 +102,13 @@ export const convertToWebp = async (buffer, mimeType) => {
       isConverted: true,
     };
   } catch (err) {
-    console.warn(`[WebP Conversion Warning] Failed converting ${mimeType} to WebP using Jimp, falling back to original:`, err.message);
+    console.warn(
+      `[WebP Conversion Warning] Failed converting ${mimeType} to WebP using Jimp (${err.message}). Using original buffer:`
+    );
     return {
       buffer,
       mimeType,
-      ext: ALLOWED_MIME_TYPES[mimeType] || '.png',
+      ext: ALLOWED_MIME_TYPES[mimeType] || '.webp',
       isConverted: false,
     };
   }
@@ -113,7 +122,7 @@ export const sanitizeFolder = (folderName) => {
   return allowedFolders.includes(clean) ? clean : 'general';
 };
 
-// Multer memory storage (keeps binary in memory Buffer, saves to PostgreSQL)
+// Multer memory storage (keeps binary in memory Buffer during request, then saves via storageService)
 const storage = multer.memoryStorage();
 
 // File filter for security
@@ -130,8 +139,7 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Multer upload middleware instance.
-// Hard ceiling is the video limit; non-video files are re-checked against 15MB in the handler.
+// Multer upload middleware instance
 export const multerUpload = multer({
   storage,
   fileFilter,
@@ -142,7 +150,10 @@ export const multerUpload = multer({
 });
 
 /**
- * Handle single file upload - saves directly to PostgreSQL media_files table
+ * Handle single file upload:
+ * 1. Converts images to .webp format for faster loading.
+ * 2. Saves file via storageService (FTP or local /internal-files fallback).
+ * 3. Records metadata in PostgreSQL media_files with data = NULL (NO DB BLOBS).
  */
 export const handleSingleUpload = async (req, res) => {
   try {
@@ -164,7 +175,7 @@ export const handleSingleUpload = async (req, res) => {
       });
     }
 
-    // Keep the original 15MB limit for everything that is not a video
+    // Keep the 15MB limit for non-videos
     if (!isVideo && req.file.size > MAX_FILE_SIZE) {
       return res.status(400).json({
         success: false,
@@ -172,37 +183,34 @@ export const handleSingleUpload = async (req, res) => {
       });
     }
 
-    // Automatically convert eligible raster images to WebP
+    // 1. Automatically convert eligible raster images to WebP
     const converted = await convertToWebp(req.file.buffer, req.file.mimetype);
     const ext = converted.ext;
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeName = `${folder}-${Date.now()}-${uniqueId}${ext}`;
 
-    let storageType = 'database';
-    let storagePath = null;
-    let dbBuffer = converted.buffer;
+    // 2. Save via storageService (FTP or /internal-files with zero database blob)
+    const saveResult = await storageService.saveFile({
+      buffer: converted.buffer,
+      filename: safeName,
+      folder,
+      mimeType: converted.mimeType,
+    });
 
-    // Upload to FTP server if configured
-    if (ftpService.isFtpConfigured()) {
-      try {
-        const remotePath = ftpService.buildRemotePath(folder, safeName);
-        await ftpService.uploadBuffer(converted.buffer, remotePath);
-        storageType = 'ftp';
-        storagePath = remotePath;
-        dbBuffer = null; // Stored on FTP, omit heavy bytea in DB
-      } catch (ftpErr) {
-        console.warn(`[FTP Upload Warning] Failed to upload ${safeName} to FTP (${ftpErr.message}), falling back to database storage.`);
-        storageType = 'database';
-        storagePath = null;
-        dbBuffer = converted.buffer;
-      }
-    }
-
+    // 3. Insert metadata only into PostgreSQL media_files table (data = NULL explicitly)
     const { rows } = await db.query(
       `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, storage_type, storage_path, data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
        RETURNING id, filename, mime_type, file_size, storage_type, storage_path`,
-      [safeName, req.file.originalname, converted.mimeType, converted.buffer.length, folder, storageType, storagePath, dbBuffer]
+      [
+        safeName,
+        req.file.originalname,
+        converted.mimeType,
+        converted.buffer.length,
+        folder,
+        saveResult.storageType,
+        saveResult.storagePath,
+      ]
     );
 
     const mediaId = rows[0].id;
@@ -211,8 +219,8 @@ export const handleSingleUpload = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: converted.isConverted
-        ? `Image converted to WebP and saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`
-        : `File saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`,
+        ? `Image converted to WebP and saved to ${saveResult.storageType} successfully.`
+        : `File saved to ${saveResult.storageType} successfully.`,
       url: relativeUrl,
       path: relativeUrl,
       mediaId,
@@ -220,20 +228,24 @@ export const handleSingleUpload = async (req, res) => {
       originalName: req.file.originalname,
       mimetype: converted.mimeType,
       size: converted.buffer.length,
-      storageType,
-      storagePath,
+      storageType: saveResult.storageType,
+      storagePath: saveResult.storagePath,
+      isFallback: saveResult.isFallback || false,
     });
   } catch (err) {
-    console.error('Database Upload Error:', err);
+    console.error('File Upload Error:', err);
     return res.status(500).json({
       success: false,
-      message: err.message || 'File upload to database failed.',
+      message: err.message || 'File upload failed.',
     });
   }
 };
 
 /**
- * Handle base64 payload upload - saves directly to PostgreSQL media_files table
+ * Handle base64 payload upload:
+ * 1. Converts images to .webp format for faster loading.
+ * 2. Saves file via storageService (FTP or local /internal-files fallback).
+ * 3. Records metadata in PostgreSQL media_files with data = NULL (NO DB BLOBS).
  */
 export const handleBase64Upload = async (req, res) => {
   try {
@@ -276,37 +288,34 @@ export const handleBase64Upload = async (req, res) => {
       });
     }
 
-    // Automatically convert eligible raster images to WebP
+    // 1. Automatically convert eligible raster images to WebP
     const converted = await convertToWebp(rawBuffer, mimeType);
     const ext = converted.ext;
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeFilename = `${folder}-${Date.now()}-${uniqueId}${ext}`;
 
-    let storageType = 'database';
-    let storagePath = null;
-    let dbBuffer = converted.buffer;
+    // 2. Save via storageService (FTP or /internal-files with zero database blob)
+    const saveResult = await storageService.saveFile({
+      buffer: converted.buffer,
+      filename: safeFilename,
+      folder,
+      mimeType: converted.mimeType,
+    });
 
-    // Upload to FTP server if configured
-    if (ftpService.isFtpConfigured()) {
-      try {
-        const remotePath = ftpService.buildRemotePath(folder, safeFilename);
-        await ftpService.uploadBuffer(converted.buffer, remotePath);
-        storageType = 'ftp';
-        storagePath = remotePath;
-        dbBuffer = null; // Stored on FTP, omit heavy bytea in DB
-      } catch (ftpErr) {
-        console.warn(`[FTP Base64 Upload Warning] Failed to upload ${safeFilename} to FTP (${ftpErr.message}), falling back to database storage.`);
-        storageType = 'database';
-        storagePath = null;
-        dbBuffer = converted.buffer;
-      }
-    }
-
+    // 3. Insert metadata into media_files with data = NULL (NO DB BLOBS)
     const { rows } = await db.query(
       `INSERT INTO media_files (filename, original_name, mime_type, file_size, folder, storage_type, storage_path, data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
        RETURNING id, filename, mime_type, file_size, storage_type, storage_path`,
-      [safeFilename, filename || safeFilename, converted.mimeType, converted.buffer.length, folder, storageType, storagePath, dbBuffer]
+      [
+        safeFilename,
+        filename || safeFilename,
+        converted.mimeType,
+        converted.buffer.length,
+        folder,
+        saveResult.storageType,
+        saveResult.storagePath,
+      ]
     );
 
     const mediaId = rows[0].id;
@@ -315,22 +324,31 @@ export const handleBase64Upload = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: converted.isConverted
-        ? `Base64 image converted to WebP and saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`
-        : `Base64 image saved to ${storageType === 'ftp' ? 'FTP server' : 'database'} successfully.`,
+        ? `Base64 image converted to WebP and saved to ${saveResult.storageType} successfully.`
+        : `Base64 file saved to ${saveResult.storageType} successfully.`,
       url: relativeUrl,
       path: relativeUrl,
       mediaId,
       filename: safeFilename,
       mimetype: converted.mimeType,
       size: converted.buffer.length,
-      storageType,
-      storagePath,
+      storageType: saveResult.storageType,
+      storagePath: saveResult.storagePath,
+      isFallback: saveResult.isFallback || false,
     });
   } catch (err) {
-    console.error('Database Base64 Upload Error:', err);
+    console.error('Base64 Upload Error:', err);
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to process base64 upload to database.',
+      message: err.message || 'Failed to process base64 upload.',
     });
   }
+};
+
+export default {
+  convertToWebp,
+  sanitizeFolder,
+  multerUpload,
+  handleSingleUpload,
+  handleBase64Upload,
 };

@@ -208,6 +208,18 @@ export const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
+    // Prevent Replay Attacks: Check if this Razorpay payment ID was already processed
+    const existingPayment = await client.query(
+      'SELECT id FROM payments WHERE provider_payment_id = $1 LIMIT 1',
+      [razorpay_payment_id]
+    );
+    if (existingPayment.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'This payment transaction has already been processed for an order.',
+      });
+    }
+
     // Payment is authentic! Now persist the order into database inside a transaction
     await client.query('BEGIN');
 
@@ -256,6 +268,15 @@ export const verifyRazorpayPayment = async (req, res) => {
       }
 
       const prod = rows[0];
+      const currentStock = parseInt(prod.stock || 0, 10);
+      if (currentStock < qty) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          success: false,
+          message: `Insufficient stock for product "${prod.name}". Only ${currentStock} unit(s) available.`,
+        });
+      }
+
       const itemPrice = parseFloat(prod.price || 0);
       const lineTotal = itemPrice * qty;
       subtotal += lineTotal;
@@ -272,7 +293,7 @@ export const verifyRazorpayPayment = async (req, res) => {
 
       // Update stock
       await client.query(
-        'UPDATE products SET stock = GREATEST(0, stock - $1), updated_at = NOW() WHERE id = $2',
+        'UPDATE products SET stock = stock - $1, updated_at = NOW() WHERE id = $2',
         [qty, prod.id]
       );
     }
@@ -285,6 +306,32 @@ export const verifyRazorpayPayment = async (req, res) => {
     const shippingFee = subtotal > 150 ? 0.0 : 15.0;
     const tax = 0.0;
     const totalAmount = subtotal + shippingFee + tax;
+
+    // Verify paid amount with Razorpay API (prevent arbitrary client-side amount tampering)
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    if (keyId && keySecret) {
+      try {
+        const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+        const rzpPayRes = await fetch(`https://api.razorpay.com/v1/payments/${razorpay_payment_id}`, {
+          headers: { Authorization: `Basic ${authHeader}` },
+        });
+        if (rzpPayRes.ok) {
+          const rzpPaymentData = await rzpPayRes.json();
+          const paidPaise = parseInt(rzpPaymentData.amount, 10);
+          const expectedPaise = Math.round(totalAmount * 100);
+          // Allow max ₹1 (100 paise) variance for rounding
+          if (Math.abs(paidPaise - expectedPaise) > 100) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+              success: false,
+              message: `Payment amount mismatch: received ₹${(paidPaise / 100).toFixed(2)}, expected ₹${totalAmount.toFixed(2)}.`,
+            });
+          }
+        }
+      } catch (verifyErr) {
+        console.warn('[Razorpay Verification Notice]: Upstream payment check warning:', verifyErr.message);
+      }
+    }
 
     const orderNumber = await generateOrderNumber(client);
     const customerName = `${finalFirstName.trim()} ${(finalLastName || '').trim()}`.trim();
