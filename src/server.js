@@ -36,6 +36,7 @@ import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
+import tokenService, { ensureRefreshTokensTable } from './services/tokenService.js';
 import userCompetitionRoute from "./routes/user/userCompetitionRoute.js"
 import ftpService from './services/ftpStorageService.js';
 import storageService from './services/storageService.js';
@@ -365,6 +366,47 @@ app.use('/api/user', userModuleRoutes);
 app.use('/api/user', orderLimiter, userPaymentRoutes);
 app.use('/api/user', userCompetitionRoute);
 
+// Universal Refresh & Logout API Endpoints
+app.post('/api/auth/refresh', authLimiter, async (req, res) => {
+  try {
+    const rawRefreshToken = req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (!rawRefreshToken) {
+      return res.status(400).json({ success: false, message: 'Refresh token is required.' });
+    }
+    const newTokens = await tokenService.rotateRefreshToken(rawRefreshToken, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+    return res.json({
+      success: true,
+      message: 'Token refreshed successfully.',
+      token: newTokens.accessToken,
+      refreshToken: newTokens.refreshToken,
+      expiresIn: newTokens.expiresIn,
+      user: newTokens.user,
+    });
+  } catch (err) {
+    const status = err.statusCode || 401;
+    return res.status(status).json({
+      success: false,
+      code: err.code || 'REFRESH_FAILED',
+      message: err.message || 'Failed to refresh token.',
+    });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const rawRefreshToken = req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (rawRefreshToken) {
+      await tokenService.revokeRefreshToken(rawRefreshToken);
+    }
+    return res.json({ success: true, message: 'Logged out successfully.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Error during logout.' });
+  }
+});
+
 // Centralized Error Handler
 app.use(errorHandler);
 
@@ -378,6 +420,7 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   await storageService.ensureMediaFilesSchema();
   ensureReviewsTable();
   ensureChatbotTable();
+  ensureRefreshTokensTable();
 
   // Non-blocking background purge of any legacy DB blobs
   storageService.purgeDbBlobs({ batchSize: 20, maxBatches: 2 }).catch((err) => {

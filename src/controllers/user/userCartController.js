@@ -158,7 +158,7 @@ export const fetchCartWithProducts = async (cartId) => {
         isFeatured: r.isFeatured,
         isNew: r.isNew,
         badge: r.badge,
-        image: r.image || '/products/product-electronics.png',
+        image: r.image || '/placeholder.jpg',
         images: imagesArr,
         categoryName: r.categoryName,
         categorySlug: r.categorySlug,

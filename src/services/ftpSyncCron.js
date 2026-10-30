@@ -51,7 +51,7 @@ export const runFtpSync = async () => {
 export const startFtpSyncCron = (intervalMs = null) => {
   if (cronTimer) return;
 
-  const ms = intervalMs || parseInt(process.env.FTP_SYNC_INTERVAL_MS || '60000', 10);
+  const ms = intervalMs || parseInt(process.env.FTP_SYNC_INTERVAL_MS || '900000', 10);
   console.log(`⏱️ FTP Background Sync Cron scheduled to run every ${Math.round(ms / 1000)}s`);
 
   // Initial sync check 5 seconds after server startup

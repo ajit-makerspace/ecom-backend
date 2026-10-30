@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import db from '../../config/db.js';
 import { JWT_SECRET } from '../../config/jwt.js';
 import emailService from '../../services/emailService.js';
+import tokenService from '../../services/tokenService.js';
 
 // Customer Registration Controller (Inserts into public.users and optionally public.user_addresses)
 export const registerUser = async (req, res) => {
@@ -137,19 +138,11 @@ export const registerUser = async (req, res) => {
       createdAddress = newAddressRes.rows[0];
     }
 
-    // Issue JWT Token for the registered Customer
-    const payload = {
-      id: user.id,
-      email: user.email,
-      role: 'CUSTOMER',
-      user_type: 2,
-    };
-
-    const token = jwt.sign(
-      payload,
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
+    // Issue Access & Refresh Tokens for the registered Customer
+    const tokenPair = await tokenService.generateTokenPair(user, 2, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
 
     // Send welcome email in background (non-blocking)
     emailService.sendWelcomeEmail({ email: cleanEmail, firstName: cleanFirstName }).catch(err => {
@@ -159,7 +152,9 @@ export const registerUser = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: 'Registration successful! Welcome to Makerspace Shop.',
-      token,
+      token: tokenPair.accessToken,
+      refreshToken: tokenPair.refreshToken,
+      expiresIn: tokenPair.expiresIn,
       user: {
         id: user.id,
         email: user.email,
@@ -225,23 +220,17 @@ export const loginUser = async (req, res) => {
       [user.id]
     );
 
-    const payload = {
-      id: user.id,
-      email: user.email,
-      role: 'CUSTOMER',
-      user_type: 2,
-    };
-
-    const token = jwt.sign(
-      payload,
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
+    const tokenPair = await tokenService.generateTokenPair(user, 2, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
 
     return res.json({
       success: true,
       message: 'Login successful.',
-      token,
+      token: tokenPair.accessToken,
+      refreshToken: tokenPair.refreshToken,
+      expiresIn: tokenPair.expiresIn,
       user: {
         id: user.id,
         email: user.email,
@@ -474,20 +463,18 @@ export const verifyLoginOtp = async (req, res) => {
       [user.id]
     );
 
-    // Issue JWT Token
-    const payload = {
-      id: user.id,
-      email: user.email,
-      role: 'CUSTOMER',
-      user_type: 2,
-    };
-
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
+    // Issue Access & Refresh Tokens
+    const tokenPair = await tokenService.generateTokenPair(user, 2, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
 
     return res.json({
       success: true,
       message: 'Login successful!',
-      token,
+      token: tokenPair.accessToken,
+      refreshToken: tokenPair.refreshToken,
+      expiresIn: tokenPair.expiresIn,
       user: {
         id: user.id,
         email: user.email,
@@ -805,21 +792,19 @@ export const googleLoginUser = async (req, res) => {
       [user.id]
     );
 
-    const payload = {
-      id: user.id,
-      email: user.email,
-      role: 'CUSTOMER',
-      user_type: 2,
-    };
-
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
+    const tokenPair = await tokenService.generateTokenPair(user, 2, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
 
     return res.json({
       success: true,
       message: isNewUser
         ? 'Account created and signed in with Google successfully!'
         : 'Logged in with Google successfully.',
-      token,
+      token: tokenPair.accessToken,
+      refreshToken: tokenPair.refreshToken,
+      expiresIn: tokenPair.expiresIn,
       isNewUser,
       user: {
         id: user.id,
@@ -840,6 +825,56 @@ export const googleLoginUser = async (req, res) => {
       success: false,
       message: err.message || 'Failed to authenticate with Google.',
     });
+  }
+};
+
+/**
+ * POST /api/user/auth/refresh
+ * Silent renewal for Storefront Customer Access Token via Refresh Token
+ */
+export const refreshCustomerSession = async (req, res) => {
+  try {
+    const rawRefreshToken = req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (!rawRefreshToken) {
+      return res.status(400).json({ success: false, message: 'Refresh token is required.' });
+    }
+
+    const newTokens = await tokenService.rotateRefreshToken(rawRefreshToken, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    return res.json({
+      success: true,
+      message: 'Token refreshed successfully.',
+      token: newTokens.accessToken,
+      refreshToken: newTokens.refreshToken,
+      expiresIn: newTokens.expiresIn,
+      user: newTokens.user,
+    });
+  } catch (err) {
+    const status = err.statusCode || 401;
+    return res.status(status).json({
+      success: false,
+      code: err.code || 'REFRESH_FAILED',
+      message: err.message || 'Failed to refresh token.',
+    });
+  }
+};
+
+/**
+ * POST /api/user/auth/logout
+ * Revoke Customer Refresh Token
+ */
+export const logoutCustomer = async (req, res) => {
+  try {
+    const rawRefreshToken = req.body?.refreshToken || req.headers['x-refresh-token'];
+    if (rawRefreshToken) {
+      await tokenService.revokeRefreshToken(rawRefreshToken);
+    }
+    return res.json({ success: true, message: 'Logged out successfully.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Error during logout.' });
   }
 };
 

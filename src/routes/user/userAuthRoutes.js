@@ -8,6 +8,8 @@ import {
   verifyLoginOtp,
   sendPasswordResetOtp,
   resetPasswordWithOtp,
+  refreshCustomerSession,
+  logoutCustomer,
 } from '../../controllers/user/userAuthController.js';
 import { authenticateToken } from '../../middleware/auth.js';
 
@@ -16,6 +18,8 @@ const router = express.Router();
 // Customer Auth Endpoints
 router.post('/register', registerUser);
 router.post('/login', loginUser);
+router.post('/refresh', refreshCustomerSession);
+router.post('/logout', logoutCustomer);
 router.post('/google', googleLoginUser);
 router.post('/send-login-otp', sendLoginOtp);
 router.post('/verify-login-otp', verifyLoginOtp);
