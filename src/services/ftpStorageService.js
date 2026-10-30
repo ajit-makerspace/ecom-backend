@@ -24,7 +24,7 @@ export const getFtpConfig = () => {
   const rejectUnauthorized = process.env.FTP_REJECT_UNAUTHORIZED === 'true';
 
   return {
-    host: process.env.FTP_HOST || '192.168.1.173',
+    host: process.env.FTP_HOST,
     port: parseInt(process.env.FTP_PORT || '21', 10),
     user: process.env.FTP_USER || '',
     password: process.env.FTP_PASSWORD || '',
@@ -68,7 +68,7 @@ export const buildRemotePath = (folder = 'general', filename) => {
  */
 export const withFtpClient = async (callback) => {
   let client = new ftp.Client();
-  client.ftp.timeout = 15000; // 15 seconds timeout
+  client.ftp.timeout = 7000; // 7 seconds timeout
   const config = getFtpConfig();
 
   try {
@@ -81,7 +81,7 @@ export const withFtpClient = async (callback) => {
         console.log('[FTP Storage] Server requested TLS security. Auto-negotiating TLS connection with self-signed certificate support...');
         client.close();
         client = new ftp.Client();
-        client.ftp.timeout = 15000;
+        client.ftp.timeout = 7000;
         await client.access({
           ...config,
           secure: true,
@@ -270,7 +270,7 @@ export const testConnection = async () => {
       message: 'Connected to FTP server successfully',
       pwd,
       config: {
-        host: process.env.FTP_HOST || '192.168.1.173',
+        host: process.env.FTP_HOST,
         port: parseInt(process.env.FTP_PORT || '21', 10),
         user: process.env.FTP_USER || 'user',
         rootDir: getFtpBaseDir(),

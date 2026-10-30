@@ -72,23 +72,49 @@ export const ensureLocalFolder = (folder = 'general') => {
  * @param {string} params.mimeType - MIME type of file
  * @returns {Promise<{ storageType: string, storagePath: string, localPath: string, isFallback: boolean }>}
  */
-export const saveFile = async ({ buffer, filename, folder = 'general', mimeType }) => {
+export const saveFile = async ({ buffer, filename, folder = 'general', mimeType, asyncFtp = false }) => {
   const { driver, keepLocalCache } = getStorageConfig();
   const localDir = ensureLocalFolder(folder);
   const localFilePath = path.join(localDir, filename);
 
+  // Always write locally to internal-files first for instant read availability
+  await fs.promises.writeFile(localFilePath, buffer);
+
   // Case 1: Configured for FTP storage
   if (driver === 'ftp' && ftpService.isFtpConfigured()) {
-    try {
-      const remotePath = ftpService.buildRemotePath(folder, filename);
-      await ftpService.uploadBuffer(buffer, remotePath);
+    const remotePath = ftpService.buildRemotePath(folder, filename);
 
-      // Keep a local copy in internal-files for instant zero-latency reads if enabled
-      if (keepLocalCache) {
-        await fs.promises.writeFile(localFilePath, buffer).catch((err) => {
-          console.warn(`[Storage Service] Local cache write warning for ${filename}:`, err.message);
-        });
-      }
+    // High performance mode: return HTTP response immediately, sync to FTP in background
+    if (asyncFtp) {
+      setImmediate(async () => {
+        try {
+          await ftpService.uploadBuffer(buffer, remotePath);
+          await db.query(
+            `UPDATE media_files
+             SET storage_type = 'ftp',
+                 storage_path = $1,
+                 data = NULL,
+                 updated_at = NOW()
+             WHERE filename = $2`,
+            [remotePath, filename]
+          );
+          console.log(`[Storage Service] Background FTP upload complete: ${filename} -> ${remotePath}`);
+        } catch (bgErr) {
+          console.warn(`[Storage Service] Background FTP upload deferred for ${filename} (${bgErr.message}). Scheduled for cron sync.`);
+        }
+      });
+
+      return {
+        storageType: 'pending_ftp',
+        storagePath: path.posix.join(folder, filename),
+        localPath: localFilePath,
+        isFallback: false,
+      };
+    }
+
+    // Synchronous FTP upload (for CLI scripts and test fixtures)
+    try {
+      await ftpService.uploadBuffer(buffer, remotePath);
 
       return {
         storageType: 'ftp',
@@ -101,9 +127,6 @@ export const saveFile = async ({ buffer, filename, folder = 'general', mimeType 
         `[Storage Service] FTP upload failed (${ftpErr.message}). Falling back to local storage in /internal-files/${folder}/${filename}`
       );
 
-      // Write to internal-files as fallback
-      await fs.promises.writeFile(localFilePath, buffer);
-
       return {
         storageType: 'pending_ftp',
         storagePath: path.posix.join(folder, filename),
@@ -114,8 +137,6 @@ export const saveFile = async ({ buffer, filename, folder = 'general', mimeType 
   }
 
   // Case 2: Configured for Local storage (or FTP disabled)
-  await fs.promises.writeFile(localFilePath, buffer);
-
   return {
     storageType: 'local',
     storagePath: path.posix.join(folder, filename),

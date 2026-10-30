@@ -189,12 +189,13 @@ export const handleSingleUpload = async (req, res) => {
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeName = `${folder}-${Date.now()}-${uniqueId}${ext}`;
 
-    // 2. Save via storageService (FTP or /internal-files with zero database blob)
+    // 2. Save via storageService (local disk + async background FTP push)
     const saveResult = await storageService.saveFile({
       buffer: converted.buffer,
       filename: safeName,
       folder,
       mimeType: converted.mimeType,
+      asyncFtp: true,
     });
 
     // 3. Insert metadata only into PostgreSQL media_files table (data = NULL explicitly)
@@ -294,12 +295,13 @@ export const handleBase64Upload = async (req, res) => {
     const uniqueId = crypto.randomBytes(6).toString('hex');
     const safeFilename = `${folder}-${Date.now()}-${uniqueId}${ext}`;
 
-    // 2. Save via storageService (FTP or /internal-files with zero database blob)
+    // 2. Save via storageService (local disk + async background FTP push)
     const saveResult = await storageService.saveFile({
       buffer: converted.buffer,
       filename: safeFilename,
       folder,
       mimeType: converted.mimeType,
+      asyncFtp: true,
     });
 
     // 3. Insert metadata into media_files with data = NULL (NO DB BLOBS)
