@@ -1107,34 +1107,27 @@ export const bulkImportProducts = async (req, res) => {
     await client.query('BEGIN');
     transactionStarted = true;
 
-    // Load reference records once, rather than querying for every row.
-    const [
-      modulesResult,
-      categoriesResult,
-      subcategoriesResult,
-      brandsResult,
-    ] = await Promise.all([
-      client.query(`
-        SELECT id, name
-        FROM modules
-        WHERE status != 2
-      `),
-      client.query(`
-        SELECT id, name
-        FROM categories
-        WHERE status != 2
-      `),
-      client.query(`
-        SELECT id, name, category_id
-        FROM subcategories
-        WHERE status != 2
-      `),
-      client.query(`
-        SELECT id, name
-        FROM brand_logos
-        WHERE status != 2
-      `),
-    ]);
+    // Load reference records once sequentially to prevent concurrent queries on a single client
+    const modulesResult = await client.query(`
+      SELECT id, name
+      FROM modules
+      WHERE status != 2
+    `);
+    const categoriesResult = await client.query(`
+      SELECT id, name
+      FROM categories
+      WHERE status != 2
+    `);
+    const subcategoriesResult = await client.query(`
+      SELECT id, name, category_id
+      FROM subcategories
+      WHERE status != 2
+    `);
+    const brandsResult = await client.query(`
+      SELECT id, name
+      FROM brand_logos
+      WHERE status != 2
+    `);
 
     const modules = modulesResult.rows;
     const categories = categoriesResult.rows;
