@@ -68,7 +68,7 @@ export const buildRemotePath = (folder = 'general', filename) => {
  */
 export const withFtpClient = async (callback) => {
   let client = new ftp.Client();
-  client.ftp.timeout = 15000; // 15 seconds timeout
+  client.ftp.timeout = 7000; // 7 seconds timeout
   const config = getFtpConfig();
 
   try {
@@ -81,7 +81,7 @@ export const withFtpClient = async (callback) => {
         console.log('[FTP Storage] Server requested TLS security. Auto-negotiating TLS connection with self-signed certificate support...');
         client.close();
         client = new ftp.Client();
-        client.ftp.timeout = 15000;
+        client.ftp.timeout = 7000;
         await client.access({
           ...config,
           secure: true,
