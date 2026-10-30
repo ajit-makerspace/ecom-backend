@@ -81,7 +81,7 @@ export const getOrders = async (req, res) => {
           ...it,
           price: parseFloat(it.price || 0),
           quantity: parseInt(it.quantity || 1, 10),
-          image: it.image || '/products/product-electronics.png',
+          image: it.image || '/placeholder.jpg',
         })) : [],
       };
     });

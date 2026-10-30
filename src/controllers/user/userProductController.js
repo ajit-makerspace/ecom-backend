@@ -126,7 +126,7 @@ import db from '../../config/db.js';
 //       oldPrice: p.oldPrice ? parseFloat(p.oldPrice) : null,
 //       rating: parseFloat(p.rating || 0),
 //       reviewsCount: parseInt(p.reviewsCount || 0, 10),
-//       image: p.image || '/products/product-electronics.png',
+//       image: p.image || '/placeholder.jpg',
 //       images: Array.isArray(p.images)
 //         ? p.images
 //         : typeof p.images === 'string'
@@ -289,7 +289,7 @@ export const getStoreProducts = async (req, res) => {
       oldPrice: p.oldPrice ? parseFloat(p.oldPrice) : null,
       rating: parseFloat(p.rating || 0),
       reviewsCount: parseInt(p.reviewsCount || 0, 10),
-      image: p.image || '/products/product-electronics.png',
+      image: p.image || '/placeholder.jpg',
       images: Array.isArray(p.images)
         ? p.images
         : typeof p.images === 'string'
@@ -401,7 +401,7 @@ export const getStoreProductById = async (req, res) => {
       oldPrice: prod.oldPrice ? parseFloat(prod.oldPrice) : null,
       rating: parseFloat(prod.rating || 0),
       reviewsCount: parseInt(prod.reviewsCount || 0, 10),
-      image: prod.image || '/products/product-electronics.png',
+      image: prod.image || '/placeholder.jpg',
       images: Array.isArray(prod.images)
         ? prod.images
         : typeof prod.images === 'string'
@@ -537,7 +537,7 @@ export const getStoreProductById = async (req, res) => {
       oldPrice: r.oldPrice ? parseFloat(r.oldPrice) : null,
       rating: parseFloat(r.rating || 5.0),
       reviewsCount: parseInt(r.reviewsCount || 0, 10),
-      image: r.image || '/products/product-electronics.png',
+      image: r.image || '/placeholder.jpg',
     }));
 
     return res.json({
@@ -635,7 +635,7 @@ m.name AS "moduleName",
         oldPrice: k.oldPrice ? parseFloat(k.oldPrice) : null,
         rating: parseFloat(k.rating || 5.0),
         reviewsCount: parseInt(k.reviewsCount || 0, 10),
-        image: k.image || '/products/product-electronics.png',
+        image: k.image || '/placeholder.jpg',
         specifications:
           typeof k.specifications === 'object' && k.specifications !== null
             ? k.specifications
@@ -785,7 +785,7 @@ export const searchStoreProducts = async (req, res) => {
       price: parseFloat(p.price || 0),
       oldPrice: p.oldPrice ? parseFloat(p.oldPrice) : null,
       rating: parseFloat(p.rating || 0),
-      image: p.image || '/products/product-electronics.png',
+      image: p.image || '/placeholder.jpg',
       categoryName: p.categoryName,
       categorySlug: p.categorySlug,
     }));
