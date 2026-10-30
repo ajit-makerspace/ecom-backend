@@ -24,7 +24,7 @@ export const getFtpConfig = () => {
   const rejectUnauthorized = process.env.FTP_REJECT_UNAUTHORIZED === 'true';
 
   return {
-    host: process.env.FTP_HOST || '192.168.1.173',
+    host: process.env.FTP_HOST,
     port: parseInt(process.env.FTP_PORT || '21', 10),
     user: process.env.FTP_USER || '',
     password: process.env.FTP_PASSWORD || '',
@@ -270,7 +270,7 @@ export const testConnection = async () => {
       message: 'Connected to FTP server successfully',
       pwd,
       config: {
-        host: process.env.FTP_HOST || '192.168.1.173',
+        host: process.env.FTP_HOST,
         port: parseInt(process.env.FTP_PORT || '21', 10),
         user: process.env.FTP_USER || 'user',
         rootDir: getFtpBaseDir(),
