@@ -46,6 +46,9 @@ import db from './config/db.js';
 const app = express();
 const PORT = process.env.PORT || 3005;
 
+// Enable reverse proxy trust (e.g. Nginx, Cloudflare) for accurate client IP detection & rate limiting
+app.set('trust proxy', 1);
+
 // Disable ETag generation to prevent 304 Not Modified responses on dynamic API routes
 app.set('etag', false);
 
