@@ -59,7 +59,7 @@ export const getWishlist = async (req, res) => {
          p.category_id,
          p.status,
          c.name AS "categoryName",
-         COALESCE(p.image_url, '/products/product-electronics.png') AS image,
+         COALESCE(p.image_url, '/placeholder.jpg') AS image,
          p.images
        FROM wishlist_items wi
        JOIN products p ON wi.product_id = p.id
