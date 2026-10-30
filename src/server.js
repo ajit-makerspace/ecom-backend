@@ -18,7 +18,10 @@ import kitShowcaseRoutes from "./routes/admin/kitShowcaseRoutes.js"
 import chatbotRoutes from './routes/admin/chatbotRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 import brandLogoRoutes from './routes/admin/brandLogoRoutes.js';
+import customerLogoRoutes from './routes/admin/customerLogoRoute.js';
 import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
+import shippingRoutes from './routes/admin/shippingRoutes.js';
+import warehouseRoutes from './routes/admin/warehouseRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -33,6 +36,7 @@ import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 import userCompetitionRoute from "./routes/user/userCompetitionRoute.js"
+import ftpService from './services/ftpStorageService.js';
 
 import db from './config/db.js';
 // import { getKitShowcases } from './controllers/admin/kitsShowcaseController.js';
@@ -40,10 +44,24 @@ import db from './config/db.js';
 const app = express();
 const PORT = process.env.PORT || 3005;
 
+// Disable ETag generation to prevent 304 Not Modified responses on dynamic API routes
+app.set('etag', false);
+
 // Global Middlewares
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Prevent browser/proxy caching for all dynamic API endpoints so fresh 200 OK data is always served
+app.use('/api', (req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+  });
+  next();
+});
 
 app.get('/', (req, res) => res.json({ status: 'ok', service: 'ecom-backend', message: 'MakerSpace Masters API' }));
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
@@ -74,14 +92,14 @@ app.get(['/api/product-images/:id', '/api/product-images/file/:filename'], async
   }
 });
 
-// Database Media Streamer: Streams images directly from PostgreSQL media_files table
+// Database & FTP Media Streamer: Streams images & videos from FTP server or PostgreSQL media_files table with Range streaming support
 app.get('/api/media/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const isNumeric = /^\d+$/.test(id);
     const query = isNumeric
-      ? 'SELECT mime_type, data FROM media_files WHERE id = $1'
-      : 'SELECT mime_type, data FROM media_files WHERE filename = $1 LIMIT 1';
+      ? 'SELECT mime_type, data, storage_type, storage_path, file_size FROM media_files WHERE id = $1'
+      : 'SELECT mime_type, data, storage_type, storage_path, file_size FROM media_files WHERE filename = $1 LIMIT 1';
     const { rows } = await db.query(query, [id]);
 
     if (rows.length === 0) {
@@ -89,19 +107,59 @@ app.get('/api/media/:id', async (req, res) => {
     }
 
     const file = rows[0];
-    res.setHeader('Content-Type', file.mime_type || 'image/jpeg');
+    let data = file.data;
+
+    // If media is stored on FTP, retrieve from local disk cache or download from FTP
+    if (!data && file.storage_type === 'ftp' && file.storage_path) {
+      try {
+        data = await ftpService.downloadBuffer(file.storage_path);
+      } catch (ftpErr) {
+        console.error(`[FTP Media Stream Error] Failed to retrieve ${file.storage_path}:`, ftpErr.message);
+      }
+    }
+
+    if (!data) {
+      return res.status(404).send('Media data not available');
+    }
+
+    const totalSize = data.length;
+    const mimeType = file.mime_type || 'image/jpeg';
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-    return res.end(file.data);
+
+    // Handle HTTP Range header for video streaming
+    const rangeHeader = req.headers.range;
+    if (rangeHeader && mimeType.startsWith('video/')) {
+      const parts = rangeHeader.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+
+      if (start >= totalSize || end >= totalSize) {
+        res.status(416).setHeader('Content-Range', `bytes */${totalSize}`);
+        return res.end();
+      }
+
+      const chunkSize = end - start + 1;
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+      res.setHeader('Content-Length', chunkSize);
+      return res.end(data.subarray(start, end + 1));
+    }
+
+    res.setHeader('Content-Length', totalSize);
+    return res.end(data);
   } catch (err) {
     console.error('Serve Media Error:', err);
-    return res.status(500).send('Error loading media from database');
+    return res.status(500).send('Error loading media');
   }
 });
 
 // Serve static uploads directly from backend uploads folder (including nested products/robu, brands, banners, etc.)
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-// Database Upload Resolver: streams any /uploads/* from PostgreSQL product_images & media_files if not found on disk
+// Database & FTP Upload Resolver: streams any /uploads/* from PostgreSQL product_images, media_files or FTP server if not found on disk
 app.get('/uploads/*', async (req, res, next) => {
   try {
     const rawPath = req.params[0] || '';
@@ -114,27 +172,94 @@ app.get('/uploads/*', async (req, res, next) => {
       [filename]
     );
 
-    if (prodImgRes.rows.length > 0) {
+    if (prodImgRes.rows.length > 0 && prodImgRes.rows[0].data) {
       res.setHeader('Content-Type', prodImgRes.rows[0].mime_type || 'image/jpeg');
       res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
       return res.end(prodImgRes.rows[0].data);
     }
 
-    // 2. Check PostgreSQL media_files table
+    // 2. Check PostgreSQL media_files table (database or FTP)
     const { rows } = await db.query(
-      'SELECT mime_type, data FROM media_files WHERE filename = $1 LIMIT 1',
+      'SELECT mime_type, data, storage_type, storage_path FROM media_files WHERE filename = $1 LIMIT 1',
       [filename]
     );
 
     if (rows.length > 0) {
-      res.setHeader('Content-Type', rows[0].mime_type || 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-      return res.end(rows[0].data);
+      let data = rows[0].data;
+      if (!data && rows[0].storage_type === 'ftp' && rows[0].storage_path) {
+        try {
+          data = await ftpService.downloadBuffer(rows[0].storage_path);
+        } catch (ftpErr) {
+          console.error(`[FTP Upload Stream Error] Failed to retrieve ${rows[0].storage_path}:`, ftpErr.message);
+        }
+      }
+      if (data) {
+        res.setHeader('Content-Type', rows[0].mime_type || 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+        return res.end(data);
+      }
     }
 
-    return res.status(404).send('Image not found in backend or database');
+    // 3. Fallback: Check directly on FTP Server at /ecom/${rawPath} (e.g. /ecom/products/robu/..., /ecom/brands/..., /ecom/banners/...)
+    if (ftpService.isFtpConfigured()) {
+      try {
+        const baseDir = ftpService.getFtpBaseDir();
+        // Support both direct path (/ecom/products/robu/...) and nested uploads path (/ecom/uploads/...)
+        const remotePath = path.posix.join(baseDir, rawPath);
+        let data = null;
+        try {
+          data = await ftpService.downloadBuffer(remotePath);
+        } catch {
+          const altPath = path.posix.join(baseDir, 'uploads', rawPath);
+          data = await ftpService.downloadBuffer(altPath).catch(() => null);
+        }
+
+        if (data && data.length > 0) {
+          const ext = path.extname(filename).toLowerCase();
+          const mimeTypes = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.webp': 'image/webp',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.mp4': 'video/mp4',
+            '.webm': 'video/webm',
+            '.ogg': 'video/ogg',
+            '.pdf': 'application/pdf',
+          };
+          const mimeType = mimeTypes[ext] || 'application/octet-stream';
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+
+          // Handle HTTP Range header for video files
+          const rangeHeader = req.headers.range;
+          if (rangeHeader && mimeType.startsWith('video/')) {
+            const totalSize = data.length;
+            const parts = rangeHeader.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+            if (start < totalSize && end < totalSize) {
+              const chunkSize = end - start + 1;
+              res.status(206);
+              res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+              res.setHeader('Content-Length', chunkSize);
+              return res.end(data.subarray(start, end + 1));
+            }
+          }
+
+          res.setHeader('Content-Length', data.length);
+          return res.end(data);
+        }
+      } catch (ftpFallbackErr) {
+        // Continue to 404
+      }
+    }
+
+    return res.status(404).send('Image not found in backend, database, or FTP server');
   } catch (err) {
-    console.error('Database Upload Stream Error:', err);
+    console.error('Database/FTP Upload Stream Error:', err);
     next(err);
   }
 });
@@ -164,7 +289,10 @@ app.use('/api/admin', showcaseRoutes);
 app.use('/api/admin', kitShowcaseRoutes);
 app.use('/api/admin', chatbotRoutes);
 app.use('/api/admin', brandLogoRoutes);
+app.use('/api/admin', customerLogoRoutes);
 app.use('/api/admin', competitionRoutes);
+app.use('/api/admin', warehouseRoutes);
+app.use('/api', shippingRoutes);
 
 
 

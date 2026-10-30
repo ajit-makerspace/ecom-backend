@@ -7,13 +7,19 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon --delay 500ms src/server.js",
-    "db:init": "node src/scripts/initDb.js"
+    "test": "node --test tests/**/*.test.js",
+    "db:init": "node src/scripts/initDb.js",
+    "migrate:ftp": "node src/scripts/migrateUploadsToFtp.js"
   },
   "dependencies": {
+    "@jimp/core": "^1.6.1",
+    "@jimp/wasm-webp": "^1.6.1",
+    "basic-ftp": "^6.2.3",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "jimp": "^1.6.1",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.4.0",
     "nodemailer": "^10.0.13",

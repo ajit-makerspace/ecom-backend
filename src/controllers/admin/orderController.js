@@ -28,6 +28,12 @@ export const getOrders = async (req, res) => {
         o.invoice_number AS "invoiceNumber",
         o.invoice_date AS "invoiceDate",
         o.delivery_date AS "deliveryDate",
+        o.shiprocket_order_id AS "shiprocketOrderId",
+        o.shiprocket_shipment_id AS "shiprocketShipmentId",
+        o.shiprocket_awb_code AS "shiprocketAwbCode",
+        o.shiprocket_courier_name AS "shiprocketCourierName",
+        o.shipping_label_url AS "shippingLabelUrl",
+        o.tracking_status AS "trackingStatus",
         p.id AS "paymentId",
         p.provider_payment_id AS "paymentProviderPaymentId",
         p.status AS "paymentRecordStatus",
@@ -141,7 +147,7 @@ export const updateOrderStatus = async (req, res) => {
       LEFT JOIN users u ON o.user_id = u.id
       LEFT JOIN order_items oi ON o.id = oi.order_id
       WHERE o.id::text = $1::text OR o.order_number::text = $1::text
-      GROUP BY o.id, u.id`,
+      GROUP BY o.id, u.id, u.email`,
       [id]
     );
 

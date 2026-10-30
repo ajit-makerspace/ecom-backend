@@ -26,4 +26,7 @@ router.put('/brand-logos/:id', updateBrandLogo);
 router.patch('/brand-logos/:id', updateBrandLogo);
 router.delete('/brand-logos/:id', deleteBrandLogo);
 
+
+
+
 export default router;

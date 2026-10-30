@@ -22,8 +22,7 @@ export const getModules = async (req, res) => {
         m.description,
         m.image_url AS image,
         m.status,
-        m.created_at AS "createdAt",
-        (SELECT COUNT(*)::int FROM categories c WHERE c.module_id = m.id AND c.status != 2) AS "categoryCount"
+        m.created_at AS "createdAt"
       FROM modules m
       WHERE m.status != 2
       ORDER BY m.id ASC

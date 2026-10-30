@@ -109,6 +109,8 @@ export const getUserBrandLogos = async (req, res) => {
   }
 };
 
+
+
 /* Get one logo */
 export const getBrandLogoById = async (req, res) => {
   try {
@@ -384,6 +386,104 @@ export const deleteBrandLogo = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to delete brand logo.',
+    });
+  }
+};
+
+
+// get filtered brands (shop by brand)
+// Parses "1,2,3" (or ["1","2"]) into a clean array of positive integers
+const toIdArray = (value) => {
+  if (!value) return [];
+  const raw = Array.isArray(value) ? value.join(',') : String(value);
+  return [...new Set(
+    raw
+      .split(',')
+      .map((v) => parseInt(v.trim(), 10))
+      .filter((n) => Number.isInteger(n) && n > 0)
+  )];
+};
+
+/**
+ * GET /brand-logos/filter?moduleIds=1,2&categoryIds=5,7
+ * A brand matches if it has at least one product matching ALL the selected
+ * filter groups (OR within a group, AND across groups).
+ */
+export const getFilteredBrandLogos = async (req, res) => {
+  try {
+    const moduleIds = toIdArray(req.query.moduleIds);
+    const categoryIds = toIdArray(req.query.categoryIds);
+
+    const { rows } = await db.query(
+      `
+      SELECT ${BRAND_LOGO_COLUMNS}
+      FROM brand_logos
+      WHERE status <> 2
+        AND EXISTS (
+          SELECT 1
+          FROM products p
+          WHERE p.brand_id = brand_logos.id
+            AND p.status <> 2  -- adjust/remove to match your products table
+            AND (cardinality($1::int[]) = 0 OR p.module_id   = ANY($1::int[]))
+            AND (cardinality($2::int[]) = 0 OR p.category_id = ANY($2::int[]))
+        )
+      ORDER BY sort_order ASC, id ASC
+      `,
+      [moduleIds, categoryIds]
+    );
+
+    const brandLogos = rows.map(toApiBrandLogo);
+
+    return res.json({
+      success: true,
+      count: brandLogos.length,
+      brandLogos,
+    });
+  } catch (err) {
+    console.error('Get Filtered Brand Logos Error:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to filter brand logos.',
+    });
+  }
+};
+
+/**
+ * GET /brand-logos/filter-options
+ * Returns only the modules and categories that actually have branded products,
+ * so the sidebar never shows an option that returns zero brands.
+ */
+export const getBrandFilterOptions = async (req, res) => {
+  try {
+    const [modulesResult, categoriesResult] = await Promise.all([
+      db.query(`
+        SELECT DISTINCT m.id, m.name
+        FROM modules m
+        JOIN products p ON p.module_id = m.id
+        JOIN brand_logos b ON b.id = p.brand_id AND b.status <> 2
+        WHERE p.status <> 2
+        ORDER BY m.name ASC
+      `),
+      db.query(`
+        SELECT DISTINCT c.id, c.name
+        FROM categories c
+        JOIN products p ON p.category_id = c.id
+        JOIN brand_logos b ON b.id = p.brand_id AND b.status <> 2
+        WHERE p.status <> 2
+        ORDER BY c.name ASC
+      `),
+    ]);
+
+    return res.json({
+      success: true,
+      modules: modulesResult.rows,
+      categories: categoriesResult.rows,
+    });
+  } catch (err) {
+    console.error('Get Brand Filter Options Error:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch brand filter options.',
     });
   }
 };
