@@ -208,15 +208,33 @@ export const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    // Prevent Replay Attacks: Check if this Razorpay payment ID was already processed
+    // Prevent Replay Attacks: Check if this Razorpay payment ID or Order ID was already processed
     const existingPayment = await client.query(
-      'SELECT id FROM payments WHERE provider_payment_id = $1 LIMIT 1',
-      [razorpay_payment_id]
+      `SELECT p.id, p.order_id, o.order_number, o.total_amount, o.status, o.payment_status, o.created_at
+       FROM payments p
+       LEFT JOIN orders o ON p.order_id = o.id
+       WHERE p.provider_payment_id = $1 OR p.provider_order_id = $2
+       LIMIT 1`,
+      [razorpay_payment_id, razorpay_order_id]
     );
+
     if (existingPayment.rows.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: 'This payment transaction has already been processed for an order.',
+      const existing = existingPayment.rows[0];
+      return res.status(200).json({
+        success: true,
+        message: 'Payment already verified and order confirmed (idempotent replay).',
+        isDuplicate: true,
+        idempotentReplay: true,
+        order: {
+          id: existing.order_id,
+          orderNumber: existing.order_number,
+          totalAmount: parseFloat(existing.total_amount || 0),
+          status: existing.status,
+          paymentStatus: existing.payment_status,
+          paymentMethod: 'Razorpay',
+          razorpayPaymentId: razorpay_payment_id,
+          createdAt: existing.created_at,
+        },
       });
     }
 
@@ -391,12 +409,13 @@ export const verifyRazorpayPayment = async (req, res) => {
         place_of_supply_state_code,
         invoice_number,
         invoice_date,
+        idempotency_key,
         created_at,
         updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-        'Processing', 'Paid', 'Razorpay', $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW(), NOW()
-      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, created_at;
+        'Processing', 'Paid', 'Razorpay', $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW(), NOW()
+      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, idempotency_key, created_at;
     `;
 
     const requiresGstInvoice = Boolean(orderData?.requires_gst_invoice || orderData?.requiresGstInvoice);
@@ -434,6 +453,7 @@ export const verifyRazorpayPayment = async (req, res) => {
       placeOfSupply,
       invoiceNumber,
       invoiceDate,
+      orderData?.idempotency_key || razorpay_order_id,
     ];
 
     const orderResult = await client.query(orderInsertSql, orderValues);

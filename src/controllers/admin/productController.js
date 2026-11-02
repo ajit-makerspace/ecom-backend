@@ -1093,7 +1093,8 @@ export const bulkImportProducts = async (req, res) => {
   };
 
   try {
-    const { products } = req.body;
+    const { products, updateExisting: bodyUpdateExisting } = req.body;
+    const updateExisting = Boolean(bodyUpdateExisting || req?.query?.updateExisting === 'true');
 
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({
@@ -1114,7 +1115,7 @@ export const bulkImportProducts = async (req, res) => {
       WHERE status != 2
     `);
     const categoriesResult = await client.query(`
-      SELECT id, name
+      SELECT id, name, module_id
       FROM categories
       WHERE status != 2
     `);
@@ -1128,11 +1129,31 @@ export const bulkImportProducts = async (req, res) => {
       FROM brand_logos
       WHERE status != 2
     `);
+    const existingProductsResult = await client.query(`
+      SELECT id, name, sku, category_id, sub_category_id
+      FROM products
+      WHERE status != 2
+    `);
 
     const modules = modulesResult.rows;
     const categories = categoriesResult.rows;
     const subcategories = subcategoriesResult.rows;
     const brands = brandsResult.rows;
+
+    // Fast in-memory caches for O(1) duplicate & conflict lookups
+    const existingSkus = new Map();
+    const existingProductKeys = new Map();
+    for (const prod of existingProductsResult.rows) {
+      if (prod.sku) {
+        existingSkus.set(normalizeName(prod.sku), { id: prod.id, name: prod.name, sku: prod.sku });
+      }
+      const pKey = `${prod.category_id}_${prod.sub_category_id || 'null'}_${normalizeName(prod.name)}`;
+      existingProductKeys.set(pKey, { id: prod.id, name: prod.name, sku: prod.sku });
+    }
+
+    // In-memory sets to catch conflicts and duplicates within the incoming CSV batch
+    const csvSeenSkus = new Map(); // normalizedSku -> rowNumber
+    const csvSeenProductKeys = new Map(); // pKey -> rowNumber
 
     for (let i = 0; i < products.length; i++) {
       const item = products[i] || {};
@@ -1156,8 +1177,19 @@ export const bulkImportProducts = async (req, res) => {
 
       await client.query('SAVEPOINT import_product_row');
 
+      // Track any records created in this row to revert in-memory cache if savepoint rolls back
+      const entitiesCreatedInRow = {
+        module: null,
+        category: null,
+        subcategory: null,
+        brand: null,
+      };
+
+      let sku = null;
+      let productKey = null;
+
       try {
-        // 1. Resolve optional module name.
+        // 1. Resolve Module (reuse if exists, do not duplicate)
         const rawModuleName = getValue(
           item,
           'moduleName',
@@ -1168,22 +1200,30 @@ export const bulkImportProducts = async (req, res) => {
         let moduleId = null;
 
         if (!isBlank(rawModuleName)) {
-          const module = findByName(
+          const cleanModuleName = String(rawModuleName).trim();
+          let module = findByName(
             modules,
-            rawModuleName,
+            cleanModuleName,
             'Module'
           );
 
           if (!module) {
-            throw new Error(
-              `Module "${String(rawModuleName).trim()}" does not exist.`
+            const modSlug = `${slugify(cleanModuleName)}-${Date.now().toString().slice(-4)}-${i}-${Math.floor(Math.random() * 1000)}`;
+            const modRes = await client.query(
+              `INSERT INTO modules (name, slug, status)
+               VALUES ($1, $2, 1)
+               RETURNING id, name`,
+              [cleanModuleName, modSlug]
             );
+            module = modRes.rows[0];
+            modules.push(module);
+            entitiesCreatedInRow.module = module;
           }
 
           moduleId = module.id;
         }
 
-        // 2. Resolve required category name.
+        // 2. Resolve Category (reuse if exists, detect module hierarchy conflicts)
         const rawCategoryName = getValue(
           item,
           'categoryName',
@@ -1191,25 +1231,57 @@ export const bulkImportProducts = async (req, res) => {
           'Category Name'
         );
 
-        if (isBlank(rawCategoryName)) {
-          throw new Error('Category Name is required.');
-        }
+        const cleanCategoryName = !isBlank(rawCategoryName)
+          ? String(rawCategoryName).trim()
+          : 'General';
 
-        const category = findByName(
+        let category = findByName(
           categories,
-          rawCategoryName,
+          cleanCategoryName,
           'Category'
         );
 
-        if (!category) {
-          throw new Error(
-            `Category "${String(rawCategoryName).trim()}" does not exist.`
+        if (category) {
+          // Conflict Check: Category exists but belongs to a different Module
+          if (
+            category.module_id &&
+            moduleId &&
+            String(category.module_id) !== String(moduleId)
+          ) {
+            const existingMod = modules.find(
+              (m) => String(m.id) === String(category.module_id)
+            );
+            const existingModName = existingMod ? existingMod.name : `Module #${category.module_id}`;
+            throw new Error(
+              `Conflict: Category "${category.name}" already belongs to Module "${existingModName}", but CSV line specifies Module "${String(rawModuleName).trim()}".`
+            );
+          }
+
+          // If category previously had no module assigned and module is provided, attach it
+          if (!category.module_id && moduleId) {
+            await client.query(
+              `UPDATE categories SET module_id = $1 WHERE id = $2`,
+              [moduleId, category.id]
+            );
+            category.module_id = moduleId;
+          }
+        } else {
+          // Category does not exist -> Create under moduleId
+          const catSlug = `${slugify(cleanCategoryName)}-${Date.now().toString().slice(-4)}-${i}-${Math.floor(Math.random() * 1000)}`;
+          const catRes = await client.query(
+            `INSERT INTO categories (module_id, name, slug, status)
+             VALUES ($1, $2, $3, 1)
+             RETURNING id, name, module_id`,
+            [moduleId, cleanCategoryName, catSlug]
           );
+          category = catRes.rows[0];
+          categories.push(category);
+          entitiesCreatedInRow.category = category;
         }
 
         const categoryId = category.id;
 
-        // 3. Resolve optional sub-category and verify its parent.
+        // 3. Resolve Subcategory (reuse if exists under category, detect parent category conflicts)
         const rawSubcategoryName = getValue(
           item,
           'subCategoryName',
@@ -1222,31 +1294,105 @@ export const bulkImportProducts = async (req, res) => {
         let subCategoryId = null;
 
         if (!isBlank(rawSubcategoryName)) {
-          const subcategory = findByName(
-            subcategories,
-            rawSubcategoryName,
-            'Sub-category'
+          const cleanSubcatName = String(rawSubcategoryName).trim();
+          const normalizedSubName = normalizeName(cleanSubcatName);
+
+          // Check if subcategory already exists under this parent category
+          let subcategory = subcategories.find(
+            (s) =>
+              normalizeName(s.name) === normalizedSubName &&
+              String(s.category_id) === String(categoryId)
           );
 
-          if (!subcategory) {
-            throw new Error(
-              `Sub-category "${String(rawSubcategoryName).trim()}" does not exist.`
+          if (subcategory) {
+            // Already present under this category -> Reuse!
+            subCategoryId = subcategory.id;
+          } else {
+            // Conflict Check: Does subcategory already belong to a DIFFERENT parent category?
+            const conflictingSubcat = subcategories.find(
+              (s) => normalizeName(s.name) === normalizedSubName
             );
-          }
 
-          if (
-            String(subcategory.category_id) !==
-            String(categoryId)
-          ) {
-            throw new Error(
-              `Sub-category "${subcategory.name}" does not belong to category "${category.name}".`
+            if (conflictingSubcat) {
+              const parentCat = categories.find(
+                (c) => String(c.id) === String(conflictingSubcat.category_id)
+              );
+              const parentCatName = parentCat ? parentCat.name : `Category #${conflictingSubcat.category_id}`;
+              throw new Error(
+                `Conflict: Sub-category "${cleanSubcatName}" already belongs to Category "${parentCatName}", but CSV line specifies Category "${category.name}".`
+              );
+            }
+
+            // Subcategory does not exist -> Create new under categoryId
+            const subSlug = `${slugify(cleanSubcatName)}-${Date.now().toString().slice(-4)}-${i}-${Math.floor(Math.random() * 1000)}`;
+            const subRes = await client.query(
+              `INSERT INTO subcategories (category_id, name, slug, status)
+               VALUES ($1, $2, $3, 1)
+               RETURNING id, name, category_id`,
+              [categoryId, cleanSubcatName, subSlug]
             );
+            subcategory = subRes.rows[0];
+            subcategories.push(subcategory);
+            entitiesCreatedInRow.subcategory = subcategory;
+            subCategoryId = subcategory.id;
           }
-
-          subCategoryId = subcategory.id;
         }
 
-        // 4. Validate price and optional numeric values.
+        // 4. Product SKU Conflict Validation & Upsert Detection
+        const rawSku = getValue(item, 'sku', 'SKU');
+        let existingSkuProduct = null;
+
+        if (!isBlank(rawSku)) {
+          const cleanSku = String(rawSku).trim();
+          const normalizedSku = normalizeName(cleanSku);
+
+          // Check duplicate SKU within the same CSV batch
+          if (csvSeenSkus.has(normalizedSku)) {
+            const priorLine = csvSeenSkus.get(normalizedSku);
+            throw new Error(
+              `Conflict: Duplicate SKU "${cleanSku}" within CSV (already defined on line ${priorLine}).`
+            );
+          }
+
+          // Check if SKU already exists in catalog database
+          if (existingSkus.has(normalizedSku)) {
+            const existingProd = existingSkus.get(normalizedSku);
+            if (!updateExisting) {
+              throw new Error(
+                `Conflict: Product with SKU "${cleanSku}" already exists in the catalog ("${existingProd.name}").`
+              );
+            }
+            existingSkuProduct = existingProd;
+          }
+
+          csvSeenSkus.set(normalizedSku, rowNumber);
+          sku = cleanSku;
+        } else {
+          sku = `SKU-IMP-${Date.now()}-${i}`;
+        }
+
+        // 5. Product Name Duplicate Conflict Check in same Category/Subcategory
+        productKey = `${categoryId}_${subCategoryId || 'null'}_${normalizeName(name)}`;
+
+        if (csvSeenProductKeys.has(productKey)) {
+          const priorLine = csvSeenProductKeys.get(productKey);
+          throw new Error(
+            `Conflict: Duplicate product "${name}" within CSV for this category/subcategory (already defined on line ${priorLine}).`
+          );
+        }
+
+        if (existingProductKeys.has(productKey)) {
+          const existingProd = existingProductKeys.get(productKey);
+          if (!updateExisting || !existingSkuProduct || String(existingSkuProduct.id) !== String(existingProd.id)) {
+            throw new Error(
+              `Conflict: Product "${name}" already exists in Category "${category.name}" (SKU: ${existingProd.sku || 'N/A'}).`
+            );
+          }
+        }
+
+        csvSeenProductKeys.set(productKey, rowNumber);
+
+        // 6. Validate price and optional numeric values.
         const rawPrice = getValue(item, 'price', 'Price');
 
         if (isBlank(rawPrice)) {
@@ -1293,8 +1439,7 @@ export const bulkImportProducts = async (req, res) => {
           }
         }
 
-        // 5. Resolve brand by normalized name.
-        // Existing behavior is preserved: create a missing brand.
+        // 7. Resolve brand by normalized name.
         const rawBrandName = getValue(
           item,
           'brandName',
@@ -1334,13 +1479,15 @@ export const bulkImportProducts = async (req, res) => {
               );
 
               if (createdBrandResult.rows[0]) {
-                brands.push(createdBrandResult.rows[0]);
+                brand = createdBrandResult.rows[0];
+                brands.push(brand);
+                entitiesCreatedInRow.brand = brand;
               }
             }
           }
         }
 
-        // 6. Handle cover image separately from additional images.
+        // 8. Handle cover image separately from additional images.
         const coverImage = String(
           getValue(
             item,
@@ -1376,7 +1523,7 @@ export const bulkImportProducts = async (req, res) => {
           }
         );
 
-        // 7. Validate status.
+        // 9. Validate status.
         const rawStatus = String(
           getValue(item, 'status', 'Status') || 'Active'
         ).trim().toLowerCase();
@@ -1393,76 +1540,124 @@ export const bulkImportProducts = async (req, res) => {
           );
         }
 
-        // 8. Prepare remaining product fields.
-        const rawSku = getValue(item, 'sku', 'SKU');
-
-        const sku = !isBlank(rawSku)
-          ? String(rawSku).trim()
-          : `SKU-IMP-${Date.now()}-${i}`;
-
+        // 10. Prepare description and slug.
         const description = String(
           getValue(item, 'description', 'Description')
         ).trim();
 
-        const slug = `${slugify(name)}-${Date.now()}-${i}`;
+        const slug = `${slugify(name)}-${Date.now()}-${i}-${Math.floor(Math.random() * 1000)}`;
 
-        // 9. Insert exact resolved foreign-key IDs.
-        const insertResult = await client.query(
-          `INSERT INTO products (
-            module_id,
-            category_id,
-            sub_category_id,
-            name,
-            slug,
-            sku,
-            description,
-            brand_id,
-            price,
-            old_price,
-            weight,
-            image_url,
-            images,
-            status
-          )
-          VALUES (
-            $1, $2, $3, $4, $5, $6, $7,
-            $8, $9, $10, $11, $12, $13, $14
-          )
-          RETURNING
-            id,
-            module_id AS "moduleId",
-            category_id AS "categoryId",
-            sub_category_id AS "subCategoryId",
-            name,
-            slug,
-            sku,
-            description,
-            brand_id AS "brandId",
-            price,
-            old_price AS "oldPrice",
-            weight,
-            image_url AS "image",
-            images,
-            status`,
-          [
-            moduleId,
-            categoryId,
-            subCategoryId,
-            name,
-            slug,
-            sku,
-            description,
-            brandId,
-            price,
-            oldPrice,
-            weight,
-            coverImage,
-            JSON.stringify(uniqueAdditionalImages),
-            statusInt,
-          ]
-        );
+        let prod;
 
-        const prod = insertResult.rows[0];
+        if (existingSkuProduct) {
+          // 11a. Update existing product matching SKU
+          const updateResult = await client.query(
+            `UPDATE products SET
+              module_id = $1,
+              category_id = $2,
+              sub_category_id = $3,
+              name = $4,
+              description = $5,
+              brand_id = $6,
+              price = $7,
+              old_price = $8,
+              weight = $9,
+              image_url = $10,
+              images = $11,
+              status = $12,
+              updated_at = NOW()
+            WHERE id = $13
+            RETURNING
+              id,
+              module_id AS "moduleId",
+              category_id AS "categoryId",
+              sub_category_id AS "subCategoryId",
+              name,
+              slug,
+              sku,
+              description,
+              brand_id AS "brandId",
+              price,
+              old_price AS "oldPrice",
+              weight,
+              image_url AS "image",
+              images,
+              status`,
+            [
+              moduleId,
+              categoryId,
+              subCategoryId,
+              name,
+              description,
+              brandId,
+              price,
+              oldPrice,
+              weight,
+              coverImage,
+              JSON.stringify(uniqueAdditionalImages),
+              statusInt,
+              existingSkuProduct.id,
+            ]
+          );
+          prod = updateResult.rows[0];
+        } else {
+          // 11b. Insert new product
+          const insertResult = await client.query(
+            `INSERT INTO products (
+              module_id,
+              category_id,
+              sub_category_id,
+              name,
+              slug,
+              sku,
+              description,
+              brand_id,
+              price,
+              old_price,
+              weight,
+              image_url,
+              images,
+              status
+            )
+            VALUES (
+              $1, $2, $3, $4, $5, $6, $7,
+              $8, $9, $10, $11, $12, $13, $14
+            )
+            RETURNING
+              id,
+              module_id AS "moduleId",
+              category_id AS "categoryId",
+              sub_category_id AS "subCategoryId",
+              name,
+              slug,
+              sku,
+              description,
+              brand_id AS "brandId",
+              price,
+              old_price AS "oldPrice",
+              weight,
+              image_url AS "image",
+              images,
+              status`,
+            [
+              moduleId,
+              categoryId,
+              subCategoryId,
+              name,
+              slug,
+              sku,
+              description,
+              brandId,
+              price,
+              oldPrice,
+              weight,
+              coverImage,
+              JSON.stringify(uniqueAdditionalImages),
+              statusInt,
+            ]
+          );
+          prod = insertResult.rows[0];
+        }
 
         prod.images = Array.isArray(prod.images)
           ? prod.images
@@ -1488,6 +1683,10 @@ export const bulkImportProducts = async (req, res) => {
           csvRowNumber: rowNumber,
         });
 
+        // Register in-memory so subsequent rows see the newly created product
+        existingSkus.set(normalizeName(sku), { id: prod.id, name: prod.name, sku });
+        existingProductKeys.set(productKey, { id: prod.id, name: prod.name, sku });
+
         await client.query(
           'RELEASE SAVEPOINT import_product_row'
         );
@@ -1498,6 +1697,30 @@ export const bulkImportProducts = async (req, res) => {
         await client.query(
           'RELEASE SAVEPOINT import_product_row'
         );
+
+        // Roll back in-memory references created during this failed row
+        if (entitiesCreatedInRow.module) {
+          const idx = modules.findIndex((m) => m.id === entitiesCreatedInRow.module.id);
+          if (idx !== -1) modules.splice(idx, 1);
+        }
+        if (entitiesCreatedInRow.category) {
+          const idx = categories.findIndex((c) => c.id === entitiesCreatedInRow.category.id);
+          if (idx !== -1) categories.splice(idx, 1);
+        }
+        if (entitiesCreatedInRow.subcategory) {
+          const idx = subcategories.findIndex((s) => s.id === entitiesCreatedInRow.subcategory.id);
+          if (idx !== -1) subcategories.splice(idx, 1);
+        }
+        if (entitiesCreatedInRow.brand) {
+          const idx = brands.findIndex((b) => b.id === entitiesCreatedInRow.brand.id);
+          if (idx !== -1) brands.splice(idx, 1);
+        }
+        if (sku) {
+          csvSeenSkus.delete(normalizeName(sku));
+        }
+        if (productKey) {
+          csvSeenProductKeys.delete(productKey);
+        }
 
         rowErrors.push({
           rowNumber,
