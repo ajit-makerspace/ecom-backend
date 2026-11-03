@@ -10,6 +10,11 @@ const slugify = (text) => {
     .replace(/^-+|-+$/g, '');
 };
 
+// Uploaded videos are stored in `images` as "/api/media/<id>#video"
+const isVideoPath = (url) =>
+  typeof url === 'string' &&
+  (/#video$/.test(url) || /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url));
+
 // Resolve an existing brand ID or create/reuse a brand by name.
 const resolveBrandId = async (
   queryable,
@@ -337,8 +342,10 @@ export const createProduct = async (req, res) => {
     }
 
     const primaryImage =
-      imageList[0] ||
-      (typeof image === 'string' ? image.trim() : '');
+      imageList.find((img) => !isVideoPath(img)) ||
+      (typeof image === 'string' && !isVideoPath(image.trim())
+        ? image.trim()
+        : '');
 
     const imagesJson = JSON.stringify(imageList);
 
@@ -620,8 +627,10 @@ export const updateProduct = async (req, res) => {
     }
 
     const primaryImage =
-      imageList[0] ||
-      (typeof image === 'string' ? image.trim() : '');
+      imageList.find((img) => !isVideoPath(img)) ||
+      (typeof image === 'string' && !isVideoPath(image.trim())
+        ? image.trim()
+        : '');
 
     const imagesJson = JSON.stringify(imageList);
 
