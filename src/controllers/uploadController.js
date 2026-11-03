@@ -65,7 +65,7 @@ const CONVERTIBLE_IMAGE_MIME_TYPES = new Set([
 ]);
 
 const VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/ogg']);
-const VIDEO_ALLOWED_FOLDERS = new Set(['banners']);
+const VIDEO_ALLOWED_FOLDERS = new Set(['banners', 'products']);
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB for images / PDFs
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB for videos
