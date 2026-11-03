@@ -128,6 +128,7 @@ export const updateOrderStatus = async (req, res) => {
         o.payment_status AS "paymentStatus",
         o.payment_method AS "paymentMethod",
         o.delivery_date AS "deliveryDate",
+        o.created_at AS "createdAt",
         COALESCE(
           json_agg(
             json_build_object(
@@ -189,10 +190,15 @@ export const updateOrderStatus = async (req, res) => {
         .sendOrderStatusUpdateEmail({
           email: currentOrder.customerEmail,
           customerName: currentOrder.customerName,
+          orderId: currentOrder.id,
           orderNumber: updatedOrder.orderNumber || currentOrder.orderNumber || `MSM${currentOrder.id}`,
+          orderDate: currentOrder.createdAt,
           newStatus: status,
           oldStatus: previousStatus,
           paymentStatus: updatedOrder.paymentStatus,
+          paymentMethod: currentOrder.paymentMethod,
+          paymentMode: currentOrder.paymentMethod,
+          customerPhone: currentOrder.customerPhone,
           deliveryDate: updatedOrder.deliveryDate,
           items: currentOrder.items || [],
           totalAmount: parseFloat(currentOrder.totalAmount || 0),

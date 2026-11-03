@@ -237,6 +237,7 @@ export const createProduct = async (req, res) => {
       image,
       images,
       status,
+      returnable,
     } = req.body;
 
     if (!name || !price || !categoryId) {
@@ -322,6 +323,11 @@ export const createProduct = async (req, res) => {
         ? 1
         : 0;
 
+    const returnableInt =
+      returnable !== undefined && returnable !== null
+        ? (Number(returnable) === 0 || returnable === false || String(returnable).toLowerCase() === 'non-returnable' ? 0 : 1)
+        : 1;
+
     let imageList = [];
 
     if (Array.isArray(images) && images.length > 0) {
@@ -375,12 +381,13 @@ export const createProduct = async (req, res) => {
         image_url,
         images,
         status,
-        module_id
+        module_id,
+        returnable
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18, $19, $20, $21, $22
+        $15, $16, $17, $18, $19, $20, $21, $22, $23
       )
       RETURNING
         id,
@@ -406,6 +413,7 @@ export const createProduct = async (req, res) => {
         image_url AS "image",
         images,
         status,
+        returnable,
         created_at AS "createdAt",
         updated_at AS "updatedAt"`,
       [
@@ -430,7 +438,8 @@ export const createProduct = async (req, res) => {
         primaryImage,
         imagesJson,
         statusInt,
-        moduleId
+        moduleId,
+        returnableInt
       ]
     );
 
@@ -556,6 +565,7 @@ export const updateProduct = async (req, res) => {
       image,
       images,
       status,
+      returnable,
     } = req.body;
 
     const cleanName = String(name || '').trim();
@@ -604,6 +614,11 @@ export const updateProduct = async (req, res) => {
       status === 1
         ? 1
         : 0;
+
+    const returnableInt =
+      returnable !== undefined && returnable !== null
+        ? (Number(returnable) === 0 || returnable === false || String(returnable).toLowerCase() === 'non-returnable' ? 0 : 1)
+        : 1;
 
     let imageList = [];
 
@@ -658,8 +673,9 @@ export const updateProduct = async (req, res) => {
          image_url = $18,
          images = $19,
          status = $20,
+         returnable = $21,
          updated_at = NOW()
-       WHERE id = $21
+       WHERE id = $22
        RETURNING
          id,
          category_id AS "categoryId",
@@ -683,6 +699,7 @@ export const updateProduct = async (req, res) => {
          image_url AS "image",
          images,
          status,
+         returnable,
          created_at AS "createdAt",
          updated_at AS "updatedAt"`,
       [
@@ -706,6 +723,7 @@ export const updateProduct = async (req, res) => {
         primaryImage,
         imagesJson,
         statusInt,
+        returnableInt,
         id,
       ]
     );
@@ -1540,6 +1558,30 @@ export const bulkImportProducts = async (req, res) => {
           );
         }
 
+        // Returnable flag (default 1)
+        const rawReturnable = getValue(
+          item,
+          'returnable',
+          'Returnable',
+          'is_returnable',
+          'isReturnable',
+          'return_policy',
+          'Return Policy'
+        );
+        let returnableInt = 1;
+        if (!isBlank(rawReturnable)) {
+          const strRet = String(rawReturnable).trim().toLowerCase();
+          if (['1', 'true', 'yes', 'returnable'].includes(strRet)) {
+            returnableInt = 1;
+          } else if (['0', 'false', 'no', 'non-returnable', 'non returnable'].includes(strRet)) {
+            returnableInt = 0;
+          } else {
+            throw new Error(
+              `Returnable value "${rawReturnable}" is invalid. Use 1 (Returnable) or 0 (Non-Returnable).`
+            );
+          }
+        }
+
         // 10. Prepare description and slug.
         const description = String(
           getValue(item, 'description', 'Description')
@@ -1565,8 +1607,9 @@ export const bulkImportProducts = async (req, res) => {
               image_url = $10,
               images = $11,
               status = $12,
+              returnable = $13,
               updated_at = NOW()
-            WHERE id = $13
+            WHERE id = $14
             RETURNING
               id,
               module_id AS "moduleId",
@@ -1582,7 +1625,8 @@ export const bulkImportProducts = async (req, res) => {
               weight,
               image_url AS "image",
               images,
-              status`,
+              status,
+              returnable`,
             [
               moduleId,
               categoryId,
@@ -1596,6 +1640,7 @@ export const bulkImportProducts = async (req, res) => {
               coverImage,
               JSON.stringify(uniqueAdditionalImages),
               statusInt,
+              returnableInt,
               existingSkuProduct.id,
             ]
           );
@@ -1617,11 +1662,12 @@ export const bulkImportProducts = async (req, res) => {
               weight,
               image_url,
               images,
-              status
+              status,
+              returnable
             )
             VALUES (
               $1, $2, $3, $4, $5, $6, $7,
-              $8, $9, $10, $11, $12, $13, $14
+              $8, $9, $10, $11, $12, $13, $14, $15
             )
             RETURNING
               id,
@@ -1638,7 +1684,8 @@ export const bulkImportProducts = async (req, res) => {
               weight,
               image_url AS "image",
               images,
-              status`,
+              status,
+              returnable`,
             [
               moduleId,
               categoryId,
@@ -1654,6 +1701,7 @@ export const bulkImportProducts = async (req, res) => {
               coverImage,
               JSON.stringify(uniqueAdditionalImages),
               statusInt,
+              returnableInt,
             ]
           );
           prod = insertResult.rows[0];
@@ -1677,6 +1725,10 @@ export const bulkImportProducts = async (req, res) => {
         prod.status = prod.status === 1
           ? 'Active'
           : 'Inactive';
+        prod.returnable =
+          prod.returnable !== undefined
+            ? Number(prod.returnable)
+            : 1;
 
         createdProducts.push({
           ...prod,
@@ -2373,6 +2425,7 @@ const { rows } = await db.query(`
     p.image_url AS "image",
     p.images AS "images",
     p.status,
+    COALESCE(p.returnable, 1)::int AS returnable,
     p.created_at AS "createdAt",
     p.updated_at AS "updatedAt"
 
@@ -2405,6 +2458,7 @@ const { rows } = await db.query(`
       weight: prod.weight
         ? parseFloat(prod.weight)
         : null,
+      returnable: prod.returnable !== undefined ? Number(prod.returnable) : 1,
       status: prod.status === 1 ? 'Active' : 'Inactive',
       specifications:
         typeof prod.specifications === 'object' &&
