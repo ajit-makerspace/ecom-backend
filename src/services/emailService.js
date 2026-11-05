@@ -171,7 +171,7 @@ function getEmailLayout({ title, previewText, bodyContent }) {
         <div style="margin-bottom: 6px; text-align: center;">
           <img src="cid:shoplogo@makerspacemasters" alt="Makerspace Shop" style="height: 42px; width: auto; max-width: 220px; display: inline-block; vertical-align: middle; border: 0;" />
         </div>
-        <div class="header-sub">Hardware &amp; STEM Innovation Hub</div>
+        <div class="header-sub">Makerspace Market place</div>
       </div>
       <div class="content">
         ${bodyContent}
@@ -191,63 +191,130 @@ function getEmailLayout({ title, previewText, bodyContent }) {
 /**
  * Send 6-Digit Email Login OTP
  */
-export async function sendLoginOtpEmail({ email, otp, firstName = 'Maker' }) {
-  const subject = `Makerspace Login Code: ${otp}`;
-  const previewText = `Login verification code is ${otp}. Valid for 10 minutes.`;
+export async function sendLoginOtpEmail({
+  email,
+  otp,
+  firstName = "Maker",
+}) {
+  try {
+    const subject = "Makerspace Shop - Your Login Verification Code";
 
-  const bodyContent = `
-    <h2 style="font-size: 18px; font-weight: 800; color: #002740; margin-top: 0; margin-bottom: 8px;">
-      Hello ${firstName},
-    </h2>
-    <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0;">
-      We received a request to log in to your <strong>Makerspace Masters</strong> account using this email address. Please use the one-time verification code below to complete your sign in:
-    </p>
+    const previewText =
+      "Your login verification code is valid for 10 minutes.";
 
-    <div class="otp-box">
-      <div class="otp-label">One-Time Verification Code</div>
-      <div class="otp-code">${otp}</div>
-      <div class="otp-expiry">Valid for 10 minutes only</div>
-    </div>
+    // Escape user-provided content before inserting into HTML
+    const safeFirstName = escapeHtml(firstName);
 
-    <div class="info-card">
-      <strong>Security Notice:</strong> Never share this code with anyone. Makerspace Masters staff will never ask for your verification code. If you did not initiate this request, you can safely disregard this email.
-    </div>
+    const bodyContent = `
+      <h2 style="
+        font-size: 18px;
+        font-weight: 800;
+        color: #002740;
+        margin-top: 0;
+        margin-bottom: 8px;
+      ">
+        Hello ${safeFirstName},
+      </h2>
 
-    <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0;">
-      Happy Making,<br>
-      <strong>The Makerspace Masters Team</strong>
-    </p>
-  `;
+      <p style="
+        font-size: 13px;
+        color: #475569;
+        margin: 0 0 16px 0;
+      ">
+        We received a request to log in to your
+        <strong>Makerspace Shop</strong> account.
+        Use the one-time verification code below to complete
+        your sign-in.
+      </p>
 
-  const html = getEmailLayout({
-    title: subject,
-    previewText,
-    bodyContent,
+      <div class="otp-box">
+        <div class="otp-label">One-Time Verification Code</div>
+        <div class="otp-code">${otp}</div>
+        <div class="otp-expiry">Valid for 10 minutes only</div>
+      </div>
+
+      <div class="info-card">
+        <strong>Security Notice:</strong>
+        Never share this code with anyone.
+        Makerspace Shop staff will never ask for your verification code.
+        If you did not initiate this request, safely disregard this email.
+      </div>
+
+      <p style="
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 24px;
+        margin-bottom: 0;
+      ">
+        Happy Making,<br>
+        <strong>The Makerspace Shop Team</strong>
+      </p>
+    `;
+
+    const html = getEmailLayout({
+      title: subject,
+      previewText,
+      bodyContent,
+    });
+
+    const mailOptions = {
+      from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+      to: email,
+      subject,
+      html,
+
+      text: `
+Hello ${firstName},
+
+Your Makerspace Shop login verification code is: ${otp}
+
+This code is valid for 10 minutes only.
+
+Never share this code with anyone.
+
+If you did not request this login, please ignore this email.
+
+The Makerspace Shop Team
+      `.trim(),
+
+      attachments: getStandardAttachments(),
+    };
+
+    return await transporter.sendMail(mailOptions);
+
+  } catch (error) {
+    console.error("Login OTP email delivery failed:", error.message);
+    throw new Error("Unable to send login verification email.");
+  }
+}
+
+/**
+ * Escape HTML special characters
+ */
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, (char) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+
+    return entities[char];
   });
-
-  const mailOptions = {
-    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-    to: email,
-    subject,
-    html,
-    text: `Your Makerspace Masters Login Code is: ${otp}. It is valid for 10 minutes. If you did not request this, please ignore this email.`,
-    attachments: getStandardAttachments(),
-  };
-
-  const info = await transporter.sendMail(mailOptions);
-  return info;
 }
 
 /**
  * Send Welcome Email after successful registration
  */
 export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
-  const subject = `Welcome to Makerspace Masters, ${firstName}!`;
-  const previewText = `Welcome to Makerspace Masters! Explore 3D printers, robotics kits, and STEM tools.`;
+  const subject = `Welcome to Makerspace Shop, ${firstName}!`;
+  const previewText = `Welcome to Makerspace Shop! Explore 3D printers, robotics kits, and STEM tools.`;
 
   const bodyContent = `
     <h2 style="font-size: 18px; font-weight: 800; color: #002740; margin-top: 0; margin-bottom: 8px;">
-      Welcome to Makerspace Masters, ${firstName}!
+      Welcome to Makerspace Shop, ${firstName}!
     </h2>
     <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0;">
       Your account has been successfully created. You now have full access to high-performance hardware, STEM robotics kits, curriculum modules, and rapid tech solutions.
@@ -264,14 +331,14 @@ export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
     </div>
 
     <div style="text-align: center; margin: 28px 0;">
-      <a href="http://localhost:3000/user" style="display: inline-block; background: #002740; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none;">
+      <a href="http://test.makerspaceshop.com" style="display: inline-block; background: #002740; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none;">
         Start Exploring Products &rarr;
       </a>
     </div>
 
     <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0;">
       Warm regards,<br>
-      <strong>The Makerspace Masters Team</strong>
+      <strong>The Makerspace Shop Team</strong>
     </p>
   `;
 
@@ -286,7 +353,7 @@ export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
     to: email,
     subject,
     html,
-    text: `Welcome to Makerspace Masters, ${firstName}! Your account is now active.`,
+    text: `Welcome to Makerspace Shop, ${firstName}! Your account is now active.`,
     attachments: getStandardAttachments(),
   };
 
