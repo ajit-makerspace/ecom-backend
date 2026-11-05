@@ -22,7 +22,9 @@ export const getModules = async (req, res) => {
         m.description,
         m.image_url AS image,
         m.status,
-        m.created_at AS "createdAt"
+        m.created_at AS "createdAt",
+        (SELECT COUNT(*)::int FROM categories c WHERE c.module_id = m.id AND c.status != 2) AS "categoryCount",
+        (SELECT COUNT(*)::int FROM products p WHERE p.module_id = m.id AND p.status != 2) AS "productCount"
       FROM modules m
       WHERE m.status != 2
       ORDER BY m.id ASC
@@ -187,65 +189,121 @@ export const deleteModule = async (req, res) => {
   }
 };
 
-// 5. Bulk Import Modules (Transactional)
+// 5. Bulk Import Modules (Transactional with Deduplication & Row Errors)
 export const bulkImportModules = async (req, res) => {
   const client = await db.pool.connect();
+  const rowErrors = [];
+  const importedModules = [];
+
+  const normalizeName = (val) => String(val ?? '').trim().toLowerCase().replace(/\s+/g, '');
+
   try {
     const { modules } = req.body;
     if (!Array.isArray(modules) || modules.length === 0) {
-      return res.status(400).json({ success: false, message: 'No valid modules provided for bulk import.' });
+      return res.status(400).json({ success: false, message: 'No valid modules provided for bulk import.', rowErrors: [] });
     }
 
     await client.query('BEGIN');
 
-    const importedModules = [];
-    let skippedCount = 0;
+    // Fetch existing modules
+    const existingRes = await client.query('SELECT id, name FROM modules WHERE status != 2');
+    const existingModules = new Map();
+    for (const m of existingRes.rows) {
+      existingModules.set(normalizeName(m.name), m);
+    }
+    const csvSeenModules = new Map();
 
     for (let i = 0; i < modules.length; i++) {
       const item = modules[i];
-      if (!item || !item.name || !item.name.trim()) {
-        skippedCount++;
+      const rowNumber = Number(item.__csvRowNumber || i + 2);
+      const rawName = item.name || item['Module Name'] || '';
+      const cleanName = String(rawName).trim();
+
+      if (!cleanName) {
+        rowErrors.push({ rowNumber, productName: '', message: 'Module Name is required.' });
         continue;
       }
 
-      const cleanName = item.name.trim();
-      const baseSlug = slugify(cleanName);
-      const slug = `${baseSlug}-${Date.now().toString().slice(-4)}-${i}`;
+      const normalized = normalizeName(cleanName);
 
-      const rawCode = String(item.code || '').replace(/\D/g, '');
-      const finalCode = rawCode.length === 4
-        ? rawCode
-        : await getNextModuleCode(client);
+      // Intra-CSV duplicate check
+      if (csvSeenModules.has(normalized)) {
+        const priorLine = csvSeenModules.get(normalized);
+        rowErrors.push({
+          rowNumber,
+          productName: cleanName,
+          message: `Conflict: Duplicate module "${cleanName}" within CSV (already defined on line ${priorLine}).`,
+        });
+        continue;
+      }
 
-      const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
-      const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
+      // Existing DB duplicate check
+      if (existingModules.has(normalized)) {
+        rowErrors.push({
+          rowNumber,
+          productName: cleanName,
+          message: `Conflict: Module "${cleanName}" already exists in the database.`,
+        });
+        continue;
+      }
 
-      const insertRes = await client.query(
-        `INSERT INTO modules (name, slug, code, description, image_url, status)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, name, slug, code, description, image_url AS image, status, created_at AS "createdAt"`,
-        [cleanName, slug, finalCode, item.description || '', imageUrl, statusInt]
-      );
+      csvSeenModules.set(normalized, rowNumber);
 
-      const created = insertRes.rows[0];
-      created.status = created.status === 1 ? 'Active' : 'Inactive';
-      created.categoryCount = 0;
-      importedModules.push(created);
+      await client.query('SAVEPOINT import_module_row');
+
+      try {
+        const baseSlug = slugify(cleanName);
+        const slug = `${baseSlug}-${Date.now().toString().slice(-4)}-${i}`;
+
+        const rawCode = String(item.code || '').replace(/\D/g, '');
+        const finalCode = rawCode.length === 4
+          ? rawCode
+          : await getNextModuleCode(client);
+
+        const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+        const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
+
+        const insertRes = await client.query(
+          `INSERT INTO modules (name, slug, code, description, image_url, status)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, name, slug, code, description, image_url AS image, status, created_at AS "createdAt"`,
+          [cleanName, slug, finalCode, item.description || '', imageUrl, statusInt]
+        );
+
+        const created = insertRes.rows[0];
+        created.status = created.status === 1 ? 'Active' : 'Inactive';
+        created.categoryCount = 0;
+        importedModules.push(created);
+
+        existingModules.set(normalized, created);
+        await client.query('RELEASE SAVEPOINT import_module_row');
+      } catch (err) {
+        await client.query('ROLLBACK TO SAVEPOINT import_module_row');
+        await client.query('RELEASE SAVEPOINT import_module_row');
+        csvSeenModules.delete(normalized);
+        rowErrors.push({
+          rowNumber,
+          productName: cleanName,
+          message: err.message || 'Failed to import module.',
+        });
+      }
     }
 
     await client.query('COMMIT');
 
-    return res.status(201).json({
-      success: true,
-      message: `Successfully imported ${importedModules.length} modules.`,
+    return res.status(200).json({
+      success: importedModules.length > 0,
+      message: importedModules.length > 0
+        ? `Imported ${importedModules.length} module(s). ${rowErrors.length} row(s) skipped.`
+        : 'No modules were imported. Please review the row errors.',
       count: importedModules.length,
-      skipped: skippedCount,
       modules: importedModules,
+      rowErrors,
     });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Bulk Import Modules Error:', err);
-    return res.status(500).json({ success: false, message: 'Bulk module import failed.' });
+    return res.status(500).json({ success: false, message: 'Bulk module import failed.', rowErrors });
   } finally {
     client.release();
   }

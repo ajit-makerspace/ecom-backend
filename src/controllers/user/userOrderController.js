@@ -11,6 +11,7 @@ async function ensureOrderColumns() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date TIMESTAMPTZ;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(64) UNIQUE;
       UPDATE orders SET delivery_date = updated_at WHERE LOWER(status) = 'delivered' AND delivery_date IS NULL;
       UPDATE orders o
       SET user_id = u.id
@@ -51,6 +52,59 @@ export const placeOrder = async (req, res) => {
   const client = await db.pool.connect();
 
   try {
+    const idempotencyKey =
+      req.headers['x-idempotency-key'] ||
+      req.body.idempotency_key ||
+      req.body.idempotencyKey ||
+      null;
+
+    // Idempotency check: If this exact request was already processed, return the existing order
+    if (idempotencyKey) {
+      const existingRes = await client.query(
+        `SELECT 
+          o.id,
+          o.order_number AS "orderNumber",
+          o.total_amount AS "totalAmount",
+          o.status,
+          o.payment_status AS "paymentStatus",
+          o.payment_method AS "paymentMethod",
+          o.created_at AS "createdAt",
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'productId', oi.product_id,
+                'name', oi.product_name,
+                'sku', oi.product_sku,
+                'image', oi.product_image,
+                'price', oi.price,
+                'quantity', oi.quantity,
+                'totalPrice', oi.total_price
+              )
+            ) FILTER (WHERE oi.id IS NOT NULL),
+            '[]'
+          ) AS items
+        FROM orders o
+        LEFT JOIN order_items oi ON o.id = oi.order_id
+        WHERE o.idempotency_key = $1
+        GROUP BY o.id`,
+        [idempotencyKey]
+      );
+
+      if (existingRes.rows.length > 0) {
+        const existingOrder = existingRes.rows[0];
+        return res.status(200).json({
+          success: true,
+          message: 'Order already placed (idempotent replay).',
+          isDuplicate: true,
+          idempotentReplay: true,
+          order: {
+            ...existingOrder,
+            totalAmount: parseFloat(existingOrder.totalAmount || 0),
+          },
+        });
+      }
+    }
+
     const shipping = req.body.shipping_address || {};
     const finalFirstName = req.body.firstName || shipping.first_name || shipping.firstName || req.user?.first_name || req.user?.firstName || 'Customer';
     const finalLastName = req.body.lastName || shipping.last_name || shipping.lastName || req.user?.last_name || req.user?.lastName || '';
@@ -201,13 +255,14 @@ export const placeOrder = async (req, res) => {
         invoice_number,
         invoice_date,
         delivery_date,
+        idempotency_key,
         created_at,
         updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
         $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-        $27, $28, $29, NOW(), NOW()
-      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, delivery_date, created_at;
+        $27, $28, $29, $30, NOW(), NOW()
+      ) RETURNING id, order_number, total_amount, status, payment_status, requires_gst_invoice, customer_gstin, billing_business_name, invoice_number, invoice_date, delivery_date, idempotency_key, created_at;
     `;
 
     // Enforce server-side authoritative status (never trust client-supplied status or payment status)
@@ -257,6 +312,7 @@ export const placeOrder = async (req, res) => {
       invoiceNumber,
       invoiceDate,
       deliveryDate,
+      idempotencyKey ? String(idempotencyKey).trim() : null,
     ];
 
     const orderResult = await client.query(orderInsertSql, orderValues);
@@ -417,7 +473,45 @@ export const placeOrder = async (req, res) => {
       },
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rbErr) {}
+    }
+
+    // Handle race condition: two identical clicks arrived simultaneously and hit the unique constraint
+    if (err.code === '23505' && (err.constraint === 'orders_idempotency_key_key' || String(err.message || '').includes('idempotency_key'))) {
+      const idempotencyKey =
+        req.headers['x-idempotency-key'] ||
+        req.body.idempotency_key ||
+        req.body.idempotencyKey;
+
+      if (idempotencyKey) {
+        try {
+          const raceRes = await db.query(
+            `SELECT id, order_number AS "orderNumber", total_amount AS "totalAmount", status, payment_status AS "paymentStatus", payment_method AS "paymentMethod", created_at AS "createdAt"
+             FROM orders WHERE idempotency_key = $1`,
+            [idempotencyKey]
+          );
+          if (raceRes.rows.length > 0) {
+            const o = raceRes.rows[0];
+            return res.status(200).json({
+              success: true,
+              message: 'Order already placed (idempotent replay).',
+              isDuplicate: true,
+              idempotentReplay: true,
+              order: {
+                ...o,
+                totalAmount: parseFloat(o.totalAmount || 0),
+              },
+            });
+          }
+        } catch (lookupErr) {
+          console.error('Error recovering race order by idempotency key:', lookupErr);
+        }
+      }
+    }
+
     console.error('Place Order Transaction Error:', err);
     return res.status(500).json({ success: false, message: err.message || 'Failed to place order.' });
   } finally {
