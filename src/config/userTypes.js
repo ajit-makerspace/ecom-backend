@@ -3,14 +3,14 @@ export const USER_TYPES = {
   1: 'SUPER_ADMIN',
   2: 'CUSTOMER',
   3: 'VENDOR',
-  4: 'STAFF',
+  4: '3D',
 };
 
 export const USER_TYPE_CODES = {
   SUPER_ADMIN: 1,
   CUSTOMER: 2,
   VENDOR: 3,
-  STAFF: 4,
+  '3D': 4,
 };
 
 export const ROLE_PERMISSIONS = {
