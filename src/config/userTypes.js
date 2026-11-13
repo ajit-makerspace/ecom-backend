@@ -1,16 +1,14 @@
 // Role & User Type Definitions for Role-Based Access Control (RBAC)
 export const USER_TYPES = {
   1: 'SUPER_ADMIN',
-  2: 'CUSTOMER',
-  3: 'VENDOR',
-  4: 'STAFF',
+  4: '3D',
+  5: 'STAFF',
 };
 
 export const USER_TYPE_CODES = {
   SUPER_ADMIN: 1,
-  CUSTOMER: 2,
-  VENDOR: 3,
-  STAFF: 4,
+  '3D': 4,
+  STAFF: 5,
 };
 
 export const ROLE_PERMISSIONS = {
@@ -22,10 +20,21 @@ export const ROLE_PERMISSIONS = {
     'manage_orders',
     'view_analytics',
     'manage_settings',
+    'manage_prototype_services',
   ],
-  2: ['view_products', 'create_order', 'view_own_orders'],
-  3: ['manage_products', 'view_orders', 'view_analytics'],
-  4: ['view_categories', 'manage_products', 'manage_orders', 'view_customers'],
+  4: ['view_prototype_services', 'manage_prototype_services'],
+  5: [
+    'view_categories',
+    'manage_categories',
+    'manage_subcategories',
+    'view_products',
+    'manage_products',
+    'view_marketing',
+    'manage_marketing',
+    'manage_banners',
+    'manage_competitions',
+    'manage_showcases',
+  ],
 };
 
 export default {

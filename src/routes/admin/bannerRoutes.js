@@ -5,12 +5,12 @@ import {
   updateBanner,
   deleteBanner,
 } from '../../controllers/admin/bannerController.js';
-import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
+import { authenticateToken, requireRole } from '../../middleware/auth.js';
 
 const router = express.Router();
 
 router.use(authenticateToken);
-router.use(requireAdmin);
+router.use(requireRole([1, 5]));
 
 router.get('/banners', getBanners);
 router.post('/banners', createBanner);

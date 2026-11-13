@@ -171,7 +171,7 @@ function getEmailLayout({ title, previewText, bodyContent }) {
         <div style="margin-bottom: 6px; text-align: center;">
           <img src="cid:shoplogo@makerspacemasters" alt="Makerspace Shop" style="height: 42px; width: auto; max-width: 220px; display: inline-block; vertical-align: middle; border: 0;" />
         </div>
-        <div class="header-sub">Hardware &amp; STEM Innovation Hub</div>
+        <div class="header-sub">Makerspace Market place</div>
       </div>
       <div class="content">
         ${bodyContent}
@@ -191,63 +191,130 @@ function getEmailLayout({ title, previewText, bodyContent }) {
 /**
  * Send 6-Digit Email Login OTP
  */
-export async function sendLoginOtpEmail({ email, otp, firstName = 'Maker' }) {
-  const subject = `Makerspace Login Code: ${otp}`;
-  const previewText = `Login verification code is ${otp}. Valid for 10 minutes.`;
+export async function sendLoginOtpEmail({
+  email,
+  otp,
+  firstName = "Maker",
+}) {
+  try {
+    const subject = "Makerspace Shop - Your Login Verification Code";
 
-  const bodyContent = `
-    <h2 style="font-size: 18px; font-weight: 800; color: #002740; margin-top: 0; margin-bottom: 8px;">
-      Hello ${firstName},
-    </h2>
-    <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0;">
-      We received a request to log in to your <strong>Makerspace Masters</strong> account using this email address. Please use the one-time verification code below to complete your sign in:
-    </p>
+    const previewText =
+      "Your login verification code is valid for 10 minutes.";
 
-    <div class="otp-box">
-      <div class="otp-label">One-Time Verification Code</div>
-      <div class="otp-code">${otp}</div>
-      <div class="otp-expiry">Valid for 10 minutes only</div>
-    </div>
+    // Escape user-provided content before inserting into HTML
+    const safeFirstName = escapeHtml(firstName);
 
-    <div class="info-card">
-      <strong>Security Notice:</strong> Never share this code with anyone. Makerspace Masters staff will never ask for your verification code. If you did not initiate this request, you can safely disregard this email.
-    </div>
+    const bodyContent = `
+      <h2 style="
+        font-size: 18px;
+        font-weight: 800;
+        color: #002740;
+        margin-top: 0;
+        margin-bottom: 8px;
+      ">
+        Hello ${safeFirstName},
+      </h2>
 
-    <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0;">
-      Happy Making,<br>
-      <strong>The Makerspace Masters Team</strong>
-    </p>
-  `;
+      <p style="
+        font-size: 13px;
+        color: #475569;
+        margin: 0 0 16px 0;
+      ">
+        We received a request to log in to your
+        <strong>Makerspace Shop</strong> account.
+        Use the one-time verification code below to complete
+        your sign-in.
+      </p>
 
-  const html = getEmailLayout({
-    title: subject,
-    previewText,
-    bodyContent,
+      <div class="otp-box">
+        <div class="otp-label">One-Time Verification Code</div>
+        <div class="otp-code">${otp}</div>
+        <div class="otp-expiry">Valid for 10 minutes only</div>
+      </div>
+
+      <div class="info-card">
+        <strong>Security Notice:</strong>
+        Never share this code with anyone.
+        Makerspace Shop staff will never ask for your verification code.
+        If you did not initiate this request, safely disregard this email.
+      </div>
+
+      <p style="
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 24px;
+        margin-bottom: 0;
+      ">
+        Happy Making,<br>
+        <strong>The Makerspace Shop Team</strong>
+      </p>
+    `;
+
+    const html = getEmailLayout({
+      title: subject,
+      previewText,
+      bodyContent,
+    });
+
+    const mailOptions = {
+      from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+      to: email,
+      subject,
+      html,
+
+      text: `
+Hello ${firstName},
+
+Your Makerspace Shop login verification code is: ${otp}
+
+This code is valid for 10 minutes only.
+
+Never share this code with anyone.
+
+If you did not request this login, please ignore this email.
+
+The Makerspace Shop Team
+      `.trim(),
+
+      attachments: getStandardAttachments(),
+    };
+
+    return await transporter.sendMail(mailOptions);
+
+  } catch (error) {
+    console.error("Login OTP email delivery failed:", error.message);
+    throw new Error("Unable to send login verification email.");
+  }
+}
+
+/**
+ * Escape HTML special characters
+ */
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, (char) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+
+    return entities[char];
   });
-
-  const mailOptions = {
-    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-    to: email,
-    subject,
-    html,
-    text: `Your Makerspace Masters Login Code is: ${otp}. It is valid for 10 minutes. If you did not request this, please ignore this email.`,
-    attachments: getStandardAttachments(),
-  };
-
-  const info = await transporter.sendMail(mailOptions);
-  return info;
 }
 
 /**
  * Send Welcome Email after successful registration
  */
 export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
-  const subject = `Welcome to Makerspace Masters, ${firstName}!`;
-  const previewText = `Welcome to Makerspace Masters! Explore 3D printers, robotics kits, and STEM tools.`;
+  const subject = `Welcome to Makerspace Shop, ${firstName}!`;
+  const previewText = `Welcome to Makerspace Shop! Explore 3D printers, robotics kits, and STEM tools.`;
 
   const bodyContent = `
     <h2 style="font-size: 18px; font-weight: 800; color: #002740; margin-top: 0; margin-bottom: 8px;">
-      Welcome to Makerspace Masters, ${firstName}!
+      Welcome to Makerspace Shop, ${firstName}!
     </h2>
     <p style="font-size: 13px; color: #475569; margin: 0 0 16px 0;">
       Your account has been successfully created. You now have full access to high-performance hardware, STEM robotics kits, curriculum modules, and rapid tech solutions.
@@ -264,14 +331,14 @@ export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
     </div>
 
     <div style="text-align: center; margin: 28px 0;">
-      <a href="http://localhost:3000/user" style="display: inline-block; background: #002740; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none;">
+      <a href="http://test.makerspaceshop.com" style="display: inline-block; background: #002740; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none;">
         Start Exploring Products &rarr;
       </a>
     </div>
 
     <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0;">
       Warm regards,<br>
-      <strong>The Makerspace Masters Team</strong>
+      <strong>The Makerspace Shop Team</strong>
     </p>
   `;
 
@@ -286,7 +353,7 @@ export async function sendWelcomeEmail({ email, firstName = 'Maker' }) {
     to: email,
     subject,
     html,
-    text: `Welcome to Makerspace Masters, ${firstName}! Your account is now active.`,
+    text: `Welcome to Makerspace Shop, ${firstName}! Your account is now active.`,
     attachments: getStandardAttachments(),
   };
 
@@ -487,27 +554,463 @@ export async function sendOrderConfirmationEmail({
 }
 
 /**
- * Send Order Status Update Email (Shipped, Delivered, Processing, Cancelled, etc.)
+ * Send Makerspaceshop Delivered Email (Official Customer Delivery Notification)
+ *
+ * Implements the Makerspaceshop Delivered notification format with dynamic merge fields
+ * and configurable policy / support placeholders.
  */
-export async function sendOrderStatusUpdateEmail({
+export async function sendOrderDeliveredEmail({
   email,
   customerName = 'Maker',
+  orderId,
   orderNumber,
-  newStatus = 'Processing',
-  oldStatus,
-  paymentStatus = 'Paid',
+  orderDate,
+  createdAt,
+  deliveredDate,
   deliveryDate,
+  shippingName,
+  shippingAddressLine1,
+  shippingAddressLine2,
+  shippingAddress,
+  shippingCity,
+  shippingState,
+  shippingPincode,
+  shippingPostalCode,
+  shippingPhone,
+  customerPhone,
+  paymentMode,
+  paymentMethod,
   items = [],
-  totalAmount = 0,
   subtotal = 0,
+  shippingCharge = 0,
   shippingFee = 0,
+  gstAmount = 0,
   tax = 0,
-  shippingAddress = '',
-  shippingCity = '',
-  shippingState = '',
-  shippingPostalCode = '',
-  shippingCountry = 'India',
+  couponDiscount = 0,
+  orderTotal,
+  totalAmount = 0,
+  supportEmail,
+  supportPhone,
+  workingDaysHours,
+  returnPolicyUrl,
+  feedbackUrl,
+  companyLegalName,
+  registeredAddress,
+  returnWindowDays = '7 days',
 }) {
+  const formatINR = (val) =>
+    `₹${parseFloat(val || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+
+  const formatDate = (dateVal) => {
+    if (!dateVal) return 'Recently';
+    try {
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return String(dateVal);
+      return d.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    } catch {
+      return String(dateVal);
+    }
+  };
+
+  const cleanOrderNumber = String(orderNumber || orderId || '').replace(/^#/, '');
+  const displayOrderId = cleanOrderNumber ? `#${cleanOrderNumber}` : '';
+  const displayCustomerName = customerName || shippingName || 'Maker';
+  const displayOrderDate = formatDate(orderDate || createdAt);
+  const displayDeliveredDate = formatDate(deliveredDate || deliveryDate || new Date());
+
+  const recipientName = shippingName || customerName || 'Valued Customer';
+  const finalCity = shippingCity || '';
+  const finalState = shippingState || '';
+  const finalPincode = shippingPincode || shippingPostalCode || '';
+  const finalPhone = shippingPhone || customerPhone || '';
+
+  // Extract address lines if full address string was provided
+  let addrLine1 = shippingAddressLine1 || '';
+  let addrLine2 = shippingAddressLine2 || '';
+  if (!addrLine1 && shippingAddress) {
+    const parts = String(shippingAddress).split(/\r\n|\n|,/).map((s) => s.trim()).filter(Boolean);
+    addrLine1 = parts[0] || shippingAddress;
+    addrLine2 = parts.slice(1).join(', ') || '';
+  }
+
+  const displayPaymentMode = paymentMode || paymentMethod || 'Online Payment';
+  const numSubtotal = parseFloat(subtotal || 0);
+  const numShipping = parseFloat(shippingCharge !== undefined ? shippingCharge : shippingFee || 0);
+  const numTax = parseFloat(gstAmount !== undefined ? gstAmount : tax || 0);
+  const numDiscount = parseFloat(couponDiscount || 0);
+  const numTotal = parseFloat(
+    orderTotal !== undefined
+      ? orderTotal
+      : totalAmount || (numSubtotal + numShipping + numTax - numDiscount)
+  );
+
+  // Fallbacks for square-bracket placeholders
+  const finalSupportEmail =
+    supportEmail || process.env.SUPPORT_EMAIL || SENDER_EMAIL || 'support@makerspaceshop.com';
+  const finalSupportPhone =
+    supportPhone || process.env.SUPPORT_PHONE || '+91 98765 43210';
+  const finalWorkingHours =
+    workingDaysHours || process.env.SUPPORT_HOURS || 'Mon - Sat, 9:00 AM - 6:00 PM IST';
+  const frontendBase = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const finalPolicyLink =
+    returnPolicyUrl || `${frontendBase}/policies/return-exchange`;
+  const finalFeedbackLink =
+    feedbackUrl || `${frontendBase}/user/orders`;
+  const finalCompanyLegal =
+    companyLegalName || process.env.COMPANY_LEGAL_NAME || 'Makerspace Shop Private Limited';
+  const finalRegisteredAddress =
+    registeredAddress || process.env.COMPANY_REGISTERED_ADDRESS || 'Bangalore, Karnataka, India';
+  const finalReturnDays = returnWindowDays || '7 days';
+
+  const subject = `Delivered: Your Makerspaceshop order ${displayOrderId} has been delivered`;
+  const previewText = `Your Makerspaceshop order ${displayOrderId} has been delivered. We hope you enjoy your purchase!`;
+
+  // Build items HTML rows
+  const itemsHtml = (items || []).map((item) => {
+    const itemName = item.name || item.product_name || 'Item';
+    const sku = item.sku || item.product_sku || '';
+    const variant = item.variant || item.product_variant || '';
+    const qty = parseInt(item.quantity || 1, 10);
+    const unitPrice = parseFloat(item.price || item.unit_price || 0);
+    const lineTotal = parseFloat(item.totalPrice || item.lineTotal || unitPrice * qty);
+
+    const metaParts = [];
+    if (sku) metaParts.push(`SKU ${sku}`);
+    if (variant) metaParts.push(variant);
+    const metaString = metaParts.length > 0 ? `(${metaParts.join(', ')})` : '';
+
+    return `
+      <tr>
+        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top;">
+          <div style="font-weight: 700; color: #002740; font-size: 13px; line-height: 1.4;">${itemName}</div>
+          ${metaString ? `<div style="font-size: 11px; color: #64748b; margin-top: 3px;">${metaString}</div>` : ''}
+        </td>
+        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: center; color: #334155; font-size: 12px; font-weight: 600; vertical-align: top;">
+          ${qty}
+        </td>
+        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: right; color: #475569; font-size: 12px; vertical-align: top;">
+          ${formatINR(unitPrice)}
+        </td>
+        <td style="padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 800; color: #002740; font-size: 13px; vertical-align: top;">
+          ${formatINR(lineTotal)}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // Build items plaintext block
+  const itemsText = (items || []).map((item) => {
+    const itemName = item.name || item.product_name || 'Item';
+    const sku = item.sku || item.product_sku || '';
+    const variant = item.variant || item.product_variant || '';
+    const qty = parseInt(item.quantity || 1, 10);
+    const unitPrice = parseFloat(item.price || item.unit_price || 0);
+    const lineTotal = parseFloat(item.totalPrice || item.lineTotal || unitPrice * qty);
+
+    const metaParts = [];
+    if (sku) metaParts.push(`SKU ${sku}`);
+    if (variant) metaParts.push(variant);
+    const metaString = metaParts.length > 0 ? ` (${metaParts.join(', ')})` : '';
+
+    return `${itemName}${metaString}\nQty: ${qty} | Price: ${formatINR(unitPrice)} | Item total: ${formatINR(lineTotal)}`;
+  }).join('\n\n');
+
+  const destinationCityPin = finalCity && finalPincode ? `${finalCity} - ${finalPincode}` : (finalCity || finalPincode || '');
+  const destinationSummary = [recipientName, destinationCityPin].filter(Boolean).join(', ');
+
+  const bodyContent = `
+    <!-- Top Delivery Alert Badge -->
+    <div style="margin-bottom: 22px;">
+      <div style="display: inline-block; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">
+        <span style="display: inline-block; width: 7px; height: 7px; background: #10b981; border-radius: 50%; margin-right: 6px; vertical-align: middle;"></span>
+        Delivered
+      </div>
+      <h2 style="font-size: 20px; font-weight: 800; color: #002740; margin: 0 0 10px 0; line-height: 1.3;">
+        Hi ${displayCustomerName},
+      </h2>
+      <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0; line-height: 1.6; font-weight: 600;">
+        Your Makerspaceshop order has been delivered.
+      </p>
+      <p style="font-size: 13px; color: #475569; margin: 0; line-height: 1.6;">
+        We hope you enjoy your purchase. If anything is not right, you can request a return or replacement within <strong>[${finalReturnDays}]</strong> of delivery.
+      </p>
+    </div>
+
+    <!-- Your Order Details Card -->
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin-bottom: 24px;">
+      <h3 style="font-size: 12.5px; font-weight: 800; color: #002740; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 12px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
+        Your Order Details
+      </h3>
+      <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <tr>
+          <td style="padding: 5px 0; color: #64748b; width: 35%; font-weight: 600;">Order ID:</td>
+          <td style="padding: 5px 0; text-align: right; font-weight: 800; color: #002740; font-family: monospace; font-size: 13px;">${displayOrderId}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #64748b; font-weight: 600;">Order placed on:</td>
+          <td style="padding: 5px 0; text-align: right; font-weight: 600; color: #334155;">${displayOrderDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #64748b; font-weight: 600;">Delivered to:</td>
+          <td style="padding: 5px 0; text-align: right; font-weight: 600; color: #334155;">${destinationSummary}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #64748b; font-weight: 600;">Delivered on:</td>
+          <td style="padding: 5px 0; text-align: right; font-weight: 700; color: #059669;">${displayDeliveredDate}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Items Delivered Table -->
+    <div style="margin-bottom: 24px;">
+      <h3 style="font-size: 12.5px; font-weight: 800; color: #002740; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 10px 0;">
+        Items Delivered
+      </h3>
+      <div style="border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: #ffffff;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="background: #f1f5f9; text-align: left; font-size: 11px; text-transform: uppercase; color: #475569; letter-spacing: 0.5px;">
+              <th style="padding: 10px 10px; font-weight: 700;">Item</th>
+              <th style="padding: 10px 10px; font-weight: 700; text-align: center;">Qty</th>
+              <th style="padding: 10px 10px; font-weight: 700; text-align: right;">Price</th>
+              <th style="padding: 10px 10px; font-weight: 700; text-align: right;">Item total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml || '<tr><td colspan="4" style="padding: 12px; text-align: center; color: #94a3b8;">No items listed</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Pricing Summary -->
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin-bottom: 24px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <tr>
+          <td style="padding: 5px 0; color: #64748b;">Sub total:</td>
+          <td style="padding: 5px 0; text-align: right; color: #334155; font-weight: 600;">${formatINR(numSubtotal)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #64748b;">Standard delivery:</td>
+          <td style="padding: 5px 0; text-align: right; font-weight: 600; color: ${numShipping > 0 ? '#334155' : '#059669'};">
+            ${numShipping > 0 ? formatINR(numShipping) : 'FREE'}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #64748b;">GST:</td>
+          <td style="padding: 5px 0; text-align: right; color: #334155; font-weight: 600;">${formatINR(numTax)}</td>
+        </tr>
+        ${
+          numDiscount > 0
+            ? `
+        <tr>
+          <td style="padding: 5px 0; color: #dc2626; font-weight: 600;">Coupon discount:</td>
+          <td style="padding: 5px 0; text-align: right; color: #dc2626; font-weight: 700;">-${formatINR(numDiscount)}</td>
+        </tr>
+        `
+            : ''
+        }
+        <tr style="border-top: 2px solid #e2e8f0;">
+          <td style="padding: 12px 0 0 0; font-size: 14px; font-weight: 900; color: #002740;">Total amount:</td>
+          <td style="padding: 12px 0 0 0; text-align: right; font-size: 17px; font-weight: 900; color: #002740;">${formatINR(numTotal)}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Delivery Address & Mode of Payment -->
+    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin-bottom: 24px;">
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="vertical-align: top; width: 55%; padding-right: 12px;">
+            <h4 style="font-size: 12px; font-weight: 800; color: #002740; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">
+              Delivery Address
+            </h4>
+            <div style="font-size: 12px; color: #334155; line-height: 1.6;">
+              <strong style="color: #002740;">${recipientName}</strong><br>
+              ${addrLine1 ? `${addrLine1}<br>` : ''}
+              ${addrLine2 ? `${addrLine2}<br>` : ''}
+              ${finalCity ? `${finalCity}, ` : ''}${finalState} ${finalPincode ? `- ${finalPincode}` : ''}<br>
+              ${finalPhone ? `<span style="color: #64748b;">Mobile:</span> <strong>${finalPhone}</strong>` : ''}
+            </div>
+          </td>
+          <td style="vertical-align: top; width: 45%; border-left: 1px solid #e2e8f0; padding-left: 16px;">
+            <h4 style="font-size: 12px; font-weight: 800; color: #002740; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">
+              Mode of Payment
+            </h4>
+            <div style="font-size: 13px; color: #002740; font-weight: 700; margin-top: 4px;">
+              ${displayPaymentMode}
+            </div>
+            <div style="font-size: 11px; color: #059669; font-weight: 600; margin-top: 4px;">
+              ✓ Transaction Completed
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Return or Exchange Advisory -->
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
+      <h4 style="font-size: 13px; font-weight: 800; color: #92400e; margin: 0 0 6px 0;">
+        Need to return or exchange?
+      </h4>
+      <p style="font-size: 12px; color: #78350f; margin: 0; line-height: 1.6;">
+        If the product is damaged, defective or not what you ordered, write to <a href="mailto:${finalSupportEmail}" style="color: #b45309; font-weight: 700; text-decoration: underline;">[${finalSupportEmail}]</a> within <strong>[${finalReturnDays}]</strong> of delivery with your order ID, photos or a short unboxing video. Details are in our Purchase Policy: <a href="${finalPolicyLink}" style="color: #b45309; font-weight: 700; text-decoration: underline;">[Purchase Policy]</a>.
+      </p>
+    </div>
+
+    <!-- Feedback Section & CTA -->
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 24px;">
+      <h4 style="font-size: 14px; font-weight: 800; color: #166534; margin: 0 0 6px 0;">
+        Tell us how we did
+      </h4>
+      <p style="font-size: 12px; color: #15803d; margin: 0 0 16px 0; line-height: 1.5;">
+        We would love to hear what you think of your order. Share your feedback here:
+      </p>
+      <a href="${finalFeedbackLink}" style="display: inline-block; background: #166534; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-size: 13px; font-weight: 800; text-decoration: none; box-shadow: 0 2px 8px rgba(22, 101, 52, 0.2);">
+        Share Feedback &rarr;
+      </a>
+      <div style="margin-top: 10px; font-size: 11px;">
+        <a href="${finalFeedbackLink}" style="color: #15803d; word-break: break-all;">[${finalFeedbackLink}]</a>
+      </div>
+    </div>
+
+    <!-- Please Note & Security Box -->
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
+      <h4 style="font-size: 12px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">
+        Please Note
+      </h4>
+      <ul style="font-size: 11.5px; color: #64748b; margin: 0; padding-left: 18px; line-height: 1.7;">
+        <li>If your order had multiple shipments, each package is delivered separately and you may receive a delivered email for each.</li>
+        <li>We never ask for your banking or card details by phone or message. Please do not share them with anyone claiming to call on behalf of Makerspaceshop.</li>
+        <li>Questions about your order? Write to <a href="mailto:${finalSupportEmail}" style="color: #0071e3; font-weight: 600;">[${finalSupportEmail}]</a> or call <a href="tel:${finalSupportPhone.replace(/\s+/g, '')}" style="color: #0071e3; font-weight: 600;">[${finalSupportPhone}]</a> ([${finalWorkingHours}]) and mention your order ID <strong>${displayOrderId}</strong>.</li>
+      </ul>
+    </div>
+
+    <!-- Sign-off & Corporate Footer -->
+    <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 13px; color: #334155; line-height: 1.6;">
+      Thank you for choosing Makerspaceshop.<br>
+      <strong>Team Makerspaceshop</strong><br>
+      <span style="font-size: 11px; color: #94a3b8; display: inline-block; margin-top: 6px;">
+        [${finalCompanyLegal}] | [${finalRegisteredAddress}]
+      </span>
+    </div>
+  `;
+
+  const html = getEmailLayout({
+    title: subject,
+    previewText,
+    bodyContent,
+  });
+
+  const textContent = `
+Makerspaceshop Delivered
+Order ID ${displayOrderId}
+
+Subject: Delivered: Your Makerspaceshop order ${displayOrderId} has been delivered
+
+Hi ${displayCustomerName},
+
+Your Makerspaceshop order has been delivered.
+We hope you enjoy your purchase. If anything is not right, you can request a return or replacement within [${finalReturnDays}] of delivery.
+
+Your order details
+Order ID: ${displayOrderId}
+Order placed on: ${displayOrderDate}
+Delivered to: ${destinationSummary}
+Delivered on: ${displayDeliveredDate}
+
+Items delivered
+${itemsText}
+
+Sub total: ${formatINR(numSubtotal)}
+Standard delivery: ${numShipping > 0 ? formatINR(numShipping) : 'FREE'}
+GST: ${formatINR(numTax)}
+${numDiscount > 0 ? `Coupon discount: -${formatINR(numDiscount)}\n` : ''}Total amount: ${formatINR(numTotal)}
+
+Delivery address
+${recipientName}
+${addrLine1}
+${addrLine2 ? `${addrLine2}\n` : ''}${finalCity}, ${finalState} - ${finalPincode}
+Mobile: ${finalPhone}
+
+Mode of payment
+${displayPaymentMode}
+
+Need to return or exchange?
+If the product is damaged, defective or not what you ordered, write to [${finalSupportEmail}] within [${finalReturnDays}] of delivery with your order ID, photos or a short unboxing video. Details are in our Purchase Policy: [${finalPolicyLink}].
+
+Tell us how we did
+We would love to hear what you think of your order. Share your feedback here: [${finalFeedbackLink}].
+
+Please note
+- If your order had multiple shipments, each package is delivered separately and you may receive a delivered email for each.
+- We never ask for your banking or card details by phone or message. Please do not share them with anyone claiming to call on behalf of Makerspaceshop.
+- Questions about your order? Write to [${finalSupportEmail}] or call [${finalSupportPhone}] ([${finalWorkingHours}]) and mention your order ID ${displayOrderId}.
+
+Thank you for choosing Makerspaceshop.
+Team Makerspaceshop
+[${finalCompanyLegal}] | [${finalRegisteredAddress}]
+`.trim();
+
+  const mailOptions = {
+    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+    to: email,
+    subject,
+    html,
+    text: textContent,
+    attachments: getStandardAttachments(),
+  };
+
+  const info = await transporter.sendMail(mailOptions);
+  return info;
+}
+
+/**
+ * Send Order Status Update Email (Shipped, Delivered, Processing, Cancelled, etc.)
+ */
+export async function sendOrderStatusUpdateEmail(params) {
+  const {
+    email,
+    customerName = 'Maker',
+    orderNumber,
+    newStatus = 'Processing',
+    oldStatus,
+    paymentStatus = 'Paid',
+    deliveryDate,
+    items = [],
+    totalAmount = 0,
+    subtotal = 0,
+    shippingFee = 0,
+    tax = 0,
+    shippingAddress = '',
+    shippingCity = '',
+    shippingState = '',
+    shippingPostalCode = '',
+    shippingCountry = 'India',
+  } = params;
+
+  const statusKey = String(newStatus || '').trim().toLowerCase();
+
+  // Route delivered status to the dedicated Makerspaceshop Delivered email template
+  if (statusKey === 'delivered') {
+    return await sendOrderDeliveredEmail({
+      ...params,
+      orderNumber,
+      customerName,
+      deliveredDate: deliveryDate,
+      totalAmount,
+      subtotal,
+      shippingFee,
+      tax,
+    });
+  }
   const formatINR = (val) =>
     `₹${parseFloat(val || 0).toLocaleString('en-IN', {
       minimumFractionDigits: 2,
@@ -529,7 +1032,6 @@ export async function sendOrderStatusUpdateEmail({
     }
   };
 
-  const statusKey = String(newStatus || '').trim().toLowerCase();
   const cleanOrderNumber = String(orderNumber || '').replace(/^#/, '');
   const displayOrderNumber = cleanOrderNumber ? `#${cleanOrderNumber}` : '';
 
@@ -866,6 +1368,7 @@ export default {
   sendWelcomeEmail,
   sendOrderConfirmationEmail,
   sendOrderStatusUpdateEmail,
+  sendOrderDeliveredEmail,
   sendAdminCredentialsEmail,
 };
 

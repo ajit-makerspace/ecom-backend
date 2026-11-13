@@ -23,6 +23,7 @@ import customerLogoRoutes from './routes/admin/customerLogoRoute.js';
 import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 import shippingRoutes from './routes/admin/shippingRoutes.js';
 import warehouseRoutes from './routes/admin/warehouseRoutes.js';
+import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -37,7 +38,9 @@ import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 import tokenService, { ensureRefreshTokensTable } from './services/tokenService.js';
-import userCompetitionRoute from "./routes/user/userCompetitionRoute.js"
+import userCompetitionRoute from "./routes/user/userCompetitionRoute.js";
+import printRequestRoutes from './routes/user/printRequestRoutes.js';
+import { ensurePrototypeRequestsTable } from './controllers/prototypeController.js';
 import ftpService from './services/ftpStorageService.js';
 import storageService from './services/storageService.js';
 import { startFtpSyncCron, stopFtpSyncCron } from './services/ftpSyncCron.js';
@@ -71,11 +74,22 @@ const authLimiter = rateLimit({
   },
 });
 
+// const orderLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 60, // 60 requests per IP per window
+//   standardHeaders: true,
+//   legacyHeaders: false,
+//   message: {
+//     success: false,
+//     message: 'Too many order or checkout requests from this IP. Please try again shortly.',
+//   },
+// });
 const orderLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 60, // 60 requests per IP per window
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => ['GET', 'HEAD', 'OPTIONS'].includes(req.method),
   message: {
     success: false,
     message: 'Too many order or checkout requests from this IP. Please try again shortly.',
@@ -335,6 +349,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+
+// Limit only order creation / checkout / payment actions
+app.use(
+  [
+    '/api/user/orders',
+    '/api/user/checkout',
+    '/api/user/payment',
+  ],
+  orderLimiter
+);
+
+
 // Admin Management API Routes (with rate-limiting on auth endpoints)
 app.use('/api/admin/auth', authLimiter, authRoutes);
 app.use('/api/admin', moduleRoutes);
@@ -351,19 +377,21 @@ app.use('/api/admin', brandLogoRoutes);
 app.use('/api/admin', customerLogoRoutes);
 app.use('/api/admin', competitionRoutes);
 app.use('/api/admin', warehouseRoutes);
+app.use('/api/admin', adminPrototypeRoutes);
 app.use('/api', shippingRoutes);
+app.use('/api', printRequestRoutes);
 
 // Customer Storefront API Routes (with auth & checkout rate-limiters)
 app.use('/api/user/auth', authLimiter, userAuthRoutes);
 app.use('/api/user', userProductRoutes);
-app.use('/api/user', orderLimiter, userOrderRoutes);
+app.use('/api/user',  userOrderRoutes);
 app.use('/api/user', userProfileRoutes);
 app.use('/api/user', userCartRoutes);
 app.use('/api/user', userWishlistRoutes);
 app.use('/api/user', userEnquiryRoutes);
 app.use('/api/user', userChatbotRoutes);
 app.use('/api/user', userModuleRoutes);
-app.use('/api/user', orderLimiter, userPaymentRoutes);
+app.use('/api/user', userPaymentRoutes);
 app.use('/api/user', userCompetitionRoute);
 
 // Universal Refresh & Logout API Endpoints
@@ -421,6 +449,7 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   ensureReviewsTable();
   ensureChatbotTable();
   ensureRefreshTokensTable();
+  ensurePrototypeRequestsTable();
 
   // Non-blocking background purge of any legacy DB blobs
   storageService.purgeDbBlobs({ batchSize: 20, maxBatches: 2 }).catch((err) => {
