@@ -19,7 +19,7 @@ export async function authenticateToken(req, res, next) {
     const decoded = jwt.verify(token, JWT_SECRET);
 
     // Case A: Admin User (Super Admin or 3D / Staff)
-    if (decoded.role === 'SUPER_ADMIN' || decoded.user_type === 1 || decoded.role === '3D' || decoded.user_type === 4 || decoded.role === 'STAFF') {
+    if (decoded.role === 'SUPER_ADMIN' || decoded.user_type === 1 || decoded.role === '3D' || decoded.user_type === 4 || decoded.role === 'STAFF' || decoded.user_type === 5) {
       const { rows } = await db.query(
         'SELECT id, email, first_name, last_name, user_type, status FROM admin_users WHERE id = $1',
         [decoded.id]
@@ -109,7 +109,7 @@ export async function optionalAuth(req, res, next) {
     const decoded = jwt.verify(token, JWT_SECRET);
 
     // Case A: Admin User visiting storefront endpoints
-    if (decoded.role === 'SUPER_ADMIN' || decoded.user_type === 1 || decoded.role === '3D' || decoded.user_type === 4 || decoded.role === 'STAFF') {
+    if (decoded.role === 'SUPER_ADMIN' || decoded.user_type === 1 || decoded.role === '3D' || decoded.user_type === 4 || decoded.role === 'STAFF' || decoded.user_type === 5) {
       const { rows: adminRows } = await db.query(
         'SELECT id, email, first_name, last_name, phone, user_type, status FROM admin_users WHERE id = $1',
         [decoded.id]

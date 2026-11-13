@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireRole } from '../../middleware/auth.js';
 import {
   getAdminPrototypeRequests,
   getAdminPrototypeRequestById,
@@ -10,8 +10,9 @@ import {
 
 const router = express.Router();
 
-// All admin prototype endpoints require authentication
+// All admin prototype endpoints require authentication and SUPER_ADMIN (1) or 3D staff (4)
 router.use(authenticateToken);
+router.use(requireRole([1, 4]));
 
 // List with search, status filters, metrics, pagination
 router.get('/prototype-requests', getAdminPrototypeRequests);
