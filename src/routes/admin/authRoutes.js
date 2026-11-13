@@ -18,12 +18,12 @@ const router = express.Router();
 router.post('/login', login);
 router.post('/refresh', refreshSession);
 router.post('/logout', logout);
-router.get('/me', authenticateToken, requireAdmin, getMe);
+router.get('/me', authenticateToken, getMe);
 router.get('/admin-users', authenticateToken, requireAdmin, getAdminUsers);
 router.post('/admin-users', authenticateToken, requireAdmin, createAdminUser);
 router.put('/admin-users/:id', authenticateToken, requireAdmin, updateAdminUser);
 router.patch('/admin-users/:id/status', authenticateToken, requireAdmin, updateAdminUserStatus);
 router.delete('/admin-users/:id', authenticateToken, requireAdmin, deleteAdminUser);
-router.put('/profile', authenticateToken, requireAdmin, updateAdminProfile);
+router.put('/profile', authenticateToken, updateAdminProfile);
 
 export default router;

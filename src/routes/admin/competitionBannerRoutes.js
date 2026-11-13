@@ -8,18 +8,25 @@ import {
 
 import {
   authenticateToken,
-  requireAdmin,
+  requireRole,
 } from '../../middleware/auth.js';
-import { createCompetition, deleteCompetition, getCompetitionBanners, getCompetitionById, getCompetitions, updateCompetition } from '../../controllers/admin/competitionBannerController.js';
-import { createCompetitionBanner } from '../../controllers/admin/competitionBannerController.js';
-import { updateCompetitionBanner } from '../../controllers/admin/competitionBannerController.js';
-import { updateCompetitionBannerStatus } from '../../controllers/admin/competitionBannerController.js';
-import { deleteCompetitionBanner } from '../../controllers/admin/competitionBannerController.js';
+import {
+  createCompetition,
+  deleteCompetition,
+  getCompetitionBanners,
+  getCompetitionById,
+  getCompetitions,
+  updateCompetition,
+  createCompetitionBanner,
+  updateCompetitionBanner,
+  updateCompetitionBannerStatus,
+  deleteCompetitionBanner,
+} from '../../controllers/admin/competitionBannerController.js';
 
 const router = express.Router();
 
 router.use(authenticateToken);
-router.use(requireAdmin);
+router.use(requireRole([1, 5]));
 router.post(
   '/upload',
   multerUpload.single('file'),

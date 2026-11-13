@@ -11,7 +11,7 @@ import express from 'express';
 
 import {
   authenticateToken,
-  requireAdmin,
+  requireRole,
 } from '../../middleware/auth.js';
 import { getCustomerLogos, getCustomerLogoById,
    createCustomerLogo,
@@ -21,7 +21,7 @@ import { getCustomerLogos, getCustomerLogoById,
 const router = express.Router();
 
 router.use(authenticateToken);
-router.use(requireAdmin);
+router.use(requireRole([1, 5]));
 
 // Get all customer logos
 router.get('/customer-logos', getCustomerLogos);
