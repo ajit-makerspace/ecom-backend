@@ -23,6 +23,7 @@ import customerLogoRoutes from './routes/admin/customerLogoRoute.js';
 import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 import shippingRoutes from './routes/admin/shippingRoutes.js';
 import warehouseRoutes from './routes/admin/warehouseRoutes.js';
+// import blogsRoutes from './routes/admin/blogsRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -34,6 +35,7 @@ import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
 import userModuleRoutes from "./routes/user/userModuleRoutes.js";
 import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
+import userPrintRequestRoutes from './routes/user/userPrintRequestRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 import tokenService, { ensureRefreshTokensTable } from './services/tokenService.js';
@@ -54,7 +56,21 @@ app.set('trust proxy', 1);
 app.set('etag', false);
 
 // Global Middlewares
-app.use(cors());
+// app.use(cors());
+
+app.use(
+  cors({
+    origin: 'http://localhost:3000',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-session-id',
+    ],
+  })
+);
+
 // SEC-07: Constrain payload size to prevent resource exhaustion / OOM crashes
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -374,6 +390,7 @@ app.use('/api/admin', brandLogoRoutes);
 app.use('/api/admin', customerLogoRoutes);
 app.use('/api/admin', competitionRoutes);
 app.use('/api/admin', warehouseRoutes);
+// app.use('/api/admin', blogsRoutes);
 app.use('/api', shippingRoutes);
 
 // Customer Storefront API Routes (with auth & checkout rate-limiters)
@@ -388,6 +405,8 @@ app.use('/api/user', userChatbotRoutes);
 app.use('/api/user', userModuleRoutes);
 app.use('/api/user', userPaymentRoutes);
 app.use('/api/user', userCompetitionRoute);
+app.use('/api/user', userPrintRequestRoutes);
+
 
 // Universal Refresh & Logout API Endpoints
 app.post('/api/auth/refresh', authLimiter, async (req, res) => {
