@@ -24,6 +24,7 @@ import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 import shippingRoutes from './routes/admin/shippingRoutes.js';
 import warehouseRoutes from './routes/admin/warehouseRoutes.js';
 // import blogsRoutes from './routes/admin/blogsRoutes.js';
+import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -39,7 +40,9 @@ import userPrintRequestRoutes from './routes/user/userPrintRequestRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
 import tokenService, { ensureRefreshTokensTable } from './services/tokenService.js';
-import userCompetitionRoute from "./routes/user/userCompetitionRoute.js"
+import userCompetitionRoute from "./routes/user/userCompetitionRoute.js";
+import printRequestRoutes from './routes/user/printRequestRoutes.js';
+import { ensurePrototypeRequestsTable } from './controllers/prototypeController.js';
 import ftpService from './services/ftpStorageService.js';
 import storageService from './services/storageService.js';
 import { startFtpSyncCron, stopFtpSyncCron } from './services/ftpSyncCron.js';
@@ -391,7 +394,9 @@ app.use('/api/admin', customerLogoRoutes);
 app.use('/api/admin', competitionRoutes);
 app.use('/api/admin', warehouseRoutes);
 // app.use('/api/admin', blogsRoutes);
+app.use('/api/admin', adminPrototypeRoutes);
 app.use('/api', shippingRoutes);
+app.use('/api', printRequestRoutes);
 
 // Customer Storefront API Routes (with auth & checkout rate-limiters)
 app.use('/api/user/auth', authLimiter, userAuthRoutes);
@@ -463,6 +468,7 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   ensureReviewsTable();
   ensureChatbotTable();
   ensureRefreshTokensTable();
+  ensurePrototypeRequestsTable();
 
   // Non-blocking background purge of any legacy DB blobs
   storageService.purgeDbBlobs({ batchSize: 20, maxBatches: 2 }).catch((err) => {

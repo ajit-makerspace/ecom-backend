@@ -7,13 +7,13 @@ import {
   deleteBrandLogo,
 } from '../../controllers/admin/brandRibbonController.js';
 
-import { authenticateToken, requireAdmin } from '../../middleware/auth.js';
+import { authenticateToken, requireRole } from '../../middleware/auth.js';
 
 const router = express.Router();
 
 
 router.use(authenticateToken);
-router.use(requireAdmin);
+router.use(requireRole([1, 5]));
 
 // Keep this before /:id.
 

@@ -273,6 +273,7 @@ export const getStoreProducts = async (req, res) => {
         p.kit_discount_percentage AS "kitDiscountPercentage",
         (SELECT COUNT(*)::int FROM kit_items ki WHERE ki.kit_id = p.id) AS "componentsCount",
         p.image_url AS "image", p.images AS "images",
+        COALESCE(p.returnable, 1)::int AS returnable,
         p.description, p.created_at AS "createdAt",
         COUNT(*) OVER()::int AS "totalCount"
       ${FROM_SQL}
@@ -289,6 +290,7 @@ export const getStoreProducts = async (req, res) => {
       oldPrice: p.oldPrice ? parseFloat(p.oldPrice) : null,
       rating: parseFloat(p.rating || 0),
       reviewsCount: parseInt(p.reviewsCount || 0, 10),
+      returnable: p.returnable !== undefined ? Number(p.returnable) : 1,
       image: p.image || '/placeholder.jpg',
       images: Array.isArray(p.images)
         ? p.images
@@ -374,6 +376,7 @@ export const getStoreProductById = async (req, res) => {
         p.kit_discount_percentage AS "kitDiscountPercentage",
         p.image_url AS "image",
         p.images AS "images",
+        COALESCE(p.returnable, 1)::int AS returnable,
         p.description,
         p.weight,
         p.created_at AS "createdAt"
@@ -401,6 +404,7 @@ export const getStoreProductById = async (req, res) => {
       oldPrice: prod.oldPrice ? parseFloat(prod.oldPrice) : null,
       rating: parseFloat(prod.rating || 0),
       reviewsCount: parseInt(prod.reviewsCount || 0, 10),
+      returnable: prod.returnable !== undefined ? Number(prod.returnable) : 1,
       image: prod.image || '/placeholder.jpg',
       images: Array.isArray(prod.images)
         ? prod.images
