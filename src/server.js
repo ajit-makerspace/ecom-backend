@@ -43,7 +43,6 @@ import { ensureChatbotTable } from './controllers/admin/adminChatbotController.j
 import tokenService, { ensureRefreshTokensTable } from './services/tokenService.js';
 import userCompetitionRoute from "./routes/user/userCompetitionRoute.js";
 import printRequestRoutes from './routes/user/printRequestRoutes.js';
-import { ensurePrototypeRequestsTable } from './controllers/prototypeController.js';
 import ftpService from './services/ftpStorageService.js';
 import storageService from './services/storageService.js';
 import { startFtpSyncCron, stopFtpSyncCron } from './services/ftpSyncCron.js';
@@ -469,7 +468,6 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   ensureReviewsTable();
   ensureChatbotTable();
   ensureRefreshTokensTable();
-  ensurePrototypeRequestsTable();
 
   // Non-blocking background purge of any legacy DB blobs
   storageService.purgeDbBlobs({ batchSize: 20, maxBatches: 2 }).catch((err) => {
