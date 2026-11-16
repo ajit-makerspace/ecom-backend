@@ -1559,12 +1559,24 @@ export const bulkImportProducts = async (req, res) => {
           }
         }
 
-        // 10. Prepare description and slug.
+        // 10. Prepare description, slug, and isKit flag
         const description = String(
           getValue(item, 'description', 'Description')
         ).trim();
 
         const slug = `${slugify(name)}-${Date.now()}-${i}-${Math.floor(Math.random() * 1000)}`;
+
+        // Automatically mark is_kit = true if category is "Kits" (or explicit isKit column is truthy)
+        const rawIsKit = getValue(item, 'isKit', 'is_kit', 'Is Kit', 'IsKit');
+        const isCategoryKits =
+          normalizeName(cleanCategoryName) === 'kits' ||
+          normalizeName(category?.name) === 'kits';
+        const isExplicitKit =
+          !isBlank(rawIsKit) &&
+          (String(rawIsKit).toLowerCase() === 'true' ||
+            String(rawIsKit) === '1' ||
+            String(rawIsKit).toLowerCase() === 'yes');
+        const isKit = isCategoryKits || isExplicitKit;
 
         let prod;
 
@@ -1585,8 +1597,9 @@ export const bulkImportProducts = async (req, res) => {
               images = $11,
               status = $12,
               returnable = $13,
+              is_kit = $14,
               updated_at = NOW()
-            WHERE id = $14
+            WHERE id = $15
             RETURNING
               id,
               module_id AS "moduleId",
@@ -1603,7 +1616,8 @@ export const bulkImportProducts = async (req, res) => {
               image_url AS "image",
               images,
               status,
-              returnable`,
+              returnable,
+              is_kit AS "isKit"`,
             [
               moduleId,
               categoryId,
@@ -1618,6 +1632,7 @@ export const bulkImportProducts = async (req, res) => {
               JSON.stringify(uniqueAdditionalImages),
               statusInt,
               returnableInt,
+              isKit,
               existingSkuProduct.id,
             ]
           );
@@ -1640,11 +1655,12 @@ export const bulkImportProducts = async (req, res) => {
               image_url,
               images,
               status,
-              returnable
+              returnable,
+              is_kit
             )
             VALUES (
               $1, $2, $3, $4, $5, $6, $7,
-              $8, $9, $10, $11, $12, $13, $14, $15
+              $8, $9, $10, $11, $12, $13, $14, $15, $16
             )
             RETURNING
               id,
@@ -1662,7 +1678,8 @@ export const bulkImportProducts = async (req, res) => {
               image_url AS "image",
               images,
               status,
-              returnable`,
+              returnable,
+              is_kit AS "isKit"`,
             [
               moduleId,
               categoryId,
@@ -1679,6 +1696,7 @@ export const bulkImportProducts = async (req, res) => {
               JSON.stringify(uniqueAdditionalImages),
               statusInt,
               returnableInt,
+              isKit,
             ]
           );
           prod = insertResult.rows[0];
@@ -1706,6 +1724,7 @@ export const bulkImportProducts = async (req, res) => {
           prod.returnable !== undefined
             ? Number(prod.returnable)
             : 1;
+        prod.isKit = Boolean(prod.isKit);
 
         createdProducts.push({
           ...prod,
