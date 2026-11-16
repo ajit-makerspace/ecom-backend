@@ -23,7 +23,7 @@ import customerLogoRoutes from './routes/admin/customerLogoRoute.js';
 import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 import shippingRoutes from './routes/admin/shippingRoutes.js';
 import warehouseRoutes from './routes/admin/warehouseRoutes.js';
-// import blogsRoutes from './routes/admin/blogsRoutes.js';
+import blogsRoutes from './routes/admin/blogsRoutes.js';
 import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
@@ -36,6 +36,7 @@ import userEnquiryRoutes from './routes/user/userEnquiryRoutes.js';
 import userModuleRoutes from "./routes/user/userModuleRoutes.js";
 import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
+import userBlogsRoute from './routes/user/userBlogsRoute.js';
 import userPrintRequestRoutes from './routes/user/userPrintRequestRoutes.js';
 import { ensureReviewsTable } from './controllers/user/userReviewController.js';
 import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
@@ -393,8 +394,7 @@ app.use('/api/admin', brandLogoRoutes);
 app.use('/api/admin', customerLogoRoutes);
 app.use('/api/admin', competitionRoutes);
 app.use('/api/admin', warehouseRoutes);
-// app.use('/api/admin', blogsRoutes);
-app.use('/api/admin', adminPrototypeRoutes);
+app.use('/api/admin', blogsRoutes);
 app.use('/api', shippingRoutes);
 app.use('/api', printRequestRoutes);
 
@@ -411,6 +411,7 @@ app.use('/api/user', userModuleRoutes);
 app.use('/api/user', userPaymentRoutes);
 app.use('/api/user', userCompetitionRoute);
 app.use('/api/user', userPrintRequestRoutes);
+app.use('/api/user', userBlogsRoute);
 
 
 // Universal Refresh & Logout API Endpoints
