@@ -1,41 +1,7 @@
 import db from '../../config/db.js';
 
-let tableEnsured = false;
-async function ensureEnquiryTable() {
-  if (tableEnsured) return;
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS bulk_enquiries (
-        id SERIAL PRIMARY KEY,
-        reference_no VARCHAR(60) UNIQUE NOT NULL,
-        user_id UUID,
-        full_name VARCHAR(255) NOT NULL,
-        company_name VARCHAR(255),
-        email VARCHAR(255) NOT NULL,
-        phone VARCHAR(50) NOT NULL,
-        category VARCHAR(100),
-        estimated_quantity VARCHAR(50),
-        target_date VARCHAR(50),
-        budget VARCHAR(100),
-        gstin VARCHAR(50),
-        city VARCHAR(100),
-        pincode VARCHAR(20),
-        requirements TEXT,
-        items JSONB DEFAULT '[]'::jsonb,
-        status VARCHAR(50) DEFAULT 'PENDING',
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-    tableEnsured = true;
-  } catch (err) {
-    console.warn('Notice: bulk_enquiries table creation check:', err.message);
-  }
-}
-
 export const createBulkEnquiry = async (req, res) => {
   try {
-    await ensureEnquiryTable();
-
     const {
       fullName,
       companyName,
@@ -128,7 +94,6 @@ export const createBulkEnquiry = async (req, res) => {
 
 export const getBulkEnquiriesAdmin = async (req, res) => {
   try {
-    await ensureEnquiryTable();
     const { rows } = await db.query(
       `SELECT * FROM bulk_enquiries ORDER BY created_at DESC LIMIT 100`
     );

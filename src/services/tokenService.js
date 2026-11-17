@@ -5,31 +5,6 @@ import { JWT_SECRET, ACCESS_TOKEN_EXPIRY, REFRESH_TOKEN_EXPIRY_DAYS } from '../c
 import { USER_TYPES, ROLE_PERMISSIONS } from '../config/userTypes.js';
 
 /**
- * Ensure refresh_tokens table exists with necessary indexes
- */
-export async function ensureRefreshTokensTable() {
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS refresh_tokens (
-        id SERIAL PRIMARY KEY,
-        user_type SMALLINT NOT NULL DEFAULT 2,
-        user_id UUID NOT NULL,
-        token_hash VARCHAR(64) NOT NULL UNIQUE,
-        expires_at TIMESTAMPTZ NOT NULL,
-        revoked_at TIMESTAMPTZ DEFAULT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        user_agent TEXT,
-        ip_address VARCHAR(45)
-      );
-      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
-      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_type, user_id);
-    `);
-  } catch (err) {
-    console.error('Error ensuring refresh_tokens table:', err.message);
-  }
-}
-
-/**
  * Generate Access Token & Refresh Token pair
  * @param {Object} user - User record from admin_users or users
  * @param {number} userType - 1 (Admin) or 2 (Customer)
@@ -216,7 +191,6 @@ export async function revokeAllUserTokens(userType, userId) {
 }
 
 export default {
-  ensureRefreshTokensTable,
   generateTokenPair,
   rotateRefreshToken,
   revokeRefreshToken,

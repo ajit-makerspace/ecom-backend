@@ -3,50 +3,6 @@ import db from '../../config/db.js';
 import { generateOrderNumber } from '../../utils/orderNumberGenerator.js';
 import emailService from '../../services/emailService.js';
 
-// Ensure Razorpay tracking columns and payments table exist in DB
-export async function ensureOrderRazorpayColumns() {
-  try {
-    await db.query(`
-      ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_order_id VARCHAR(255);
-      ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_payment_id VARCHAR(255);
-      ALTER TABLE orders ADD COLUMN IF NOT EXISTS razorpay_signature TEXT;
-
-      CREATE TABLE IF NOT EXISTS payments (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-        provider VARCHAR(30) NOT NULL DEFAULT 'razorpay',
-        provider_order_id VARCHAR(100) UNIQUE,
-        provider_payment_id VARCHAR(100) UNIQUE,
-        amount BIGINT NOT NULL CHECK (amount > 0),
-        currency CHAR(3) NOT NULL DEFAULT 'INR',
-        status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
-            CHECK (status IN (
-                'PENDING',
-                'AUTHORIZED',
-                'SUCCESS',
-                'FAILED',
-                'REFUND_PENDING',
-                'PARTIALLY_REFUNDED',
-                'REFUNDED'
-            )),
-        payment_method VARCHAR(50),
-        failure_reason TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        CONSTRAINT payments_order_provider_unique
-            UNIQUE (order_id, provider, provider_order_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
-      CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
-      CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at DESC);
-    `);
-  } catch (err) {
-    console.error('Error ensuring Razorpay columns & payments table on orders:', err.message);
-  }
-}
-ensureOrderRazorpayColumns();
-
 // Public Config (Returns Razorpay Key ID for client initialization)
 export const getRazorpayConfig = async (req, res) => {
   const keyId = process.env.RAZORPAY_KEY_ID;

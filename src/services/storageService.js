@@ -334,39 +334,6 @@ export const syncLocalToFtp = async ({ limit = 50 } = {}) => {
 };
 
 /**
- * Ensures media_files table and required columns exist in PostgreSQL
- */
-export const ensureMediaFilesSchema = async () => {
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS media_files (
-        id SERIAL PRIMARY KEY,
-        filename VARCHAR(255) NOT NULL,
-        original_name VARCHAR(255),
-        mime_type VARCHAR(100) NOT NULL,
-        file_size INTEGER NOT NULL,
-        folder VARCHAR(100) NOT NULL DEFAULT 'general',
-        storage_type VARCHAR(50) NOT NULL DEFAULT 'local',
-        storage_path TEXT,
-        data BYTEA,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      ALTER TABLE media_files ADD COLUMN IF NOT EXISTS storage_type VARCHAR(50) NOT NULL DEFAULT 'local';
-      ALTER TABLE media_files ADD COLUMN IF NOT EXISTS storage_path TEXT;
-      ALTER TABLE media_files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-      ALTER TABLE media_files ALTER COLUMN data DROP NOT NULL;
-
-      CREATE INDEX IF NOT EXISTS idx_media_files_storage_type ON media_files(storage_type);
-      CREATE INDEX IF NOT EXISTS idx_media_files_filename ON media_files(filename);
-    `);
-  } catch (err) {
-    console.error('[Storage Service] Error ensuring media_files schema:', err.message);
-  }
-};
-
-/**
  * Purges any existing database blobs from PostgreSQL by dumping them to internal-files / FTP
  * and nullifying the data column to free up database storage.
  * Runs in safe batches so large databases do not exhaust Node memory or stall connections.
@@ -482,7 +449,6 @@ export default {
   readFile,
   deleteFile,
   syncLocalToFtp,
-  ensureMediaFilesSchema,
   purgeDbBlobs,
   getStorageDiagnostics,
 };
