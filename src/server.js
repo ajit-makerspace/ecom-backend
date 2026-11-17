@@ -38,9 +38,7 @@ import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import userBlogsRoute from './routes/user/userBlogsRoute.js';
 import userPrintRequestRoutes from './routes/user/userPrintRequestRoutes.js';
-import { ensureReviewsTable } from './controllers/user/userReviewController.js';
-import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
-import tokenService, { ensureRefreshTokensTable } from './services/tokenService.js';
+import tokenService from './services/tokenService.js';
 import userCompetitionRoute from "./routes/user/userCompetitionRoute.js";
 import printRequestRoutes from './routes/user/printRequestRoutes.js';
 import ftpService from './services/ftpStorageService.js';
@@ -462,12 +460,6 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Express Backend Server running on port ${PORT} (Listening on 0.0.0.0 for local network access)`);
   console.log(`🛒 Storefront API: http://localhost:${PORT}/api/user`);
   console.log(`⚙️ Admin API: http://localhost:${PORT}/api/admin`);
-
-  // Ensure storage tables and schema migrations
-  await storageService.ensureMediaFilesSchema();
-  ensureReviewsTable();
-  ensureChatbotTable();
-  ensureRefreshTokensTable();
 
   // Non-blocking background purge of any legacy DB blobs
   storageService.purgeDbBlobs({ batchSize: 20, maxBatches: 2 }).catch((err) => {
