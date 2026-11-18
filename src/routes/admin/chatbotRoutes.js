@@ -5,12 +5,14 @@ import {
   updateChatbotIntent,
   deleteChatbotIntent,
   toggleChatbotIntentStatus,
+  bulkImportChatbotIntents,
 } from '../../controllers/admin/adminChatbotController.js';
 import { authenticateToken } from '../../middleware/auth.js';
 
 const router = express.Router();
 
 router.get('/chatbot-intents', authenticateToken, getAdminChatbotIntents);
+router.post('/chatbot-intents/bulk-import', authenticateToken, bulkImportChatbotIntents);
 router.post('/chatbot-intents', authenticateToken, createChatbotIntent);
 router.put('/chatbot-intents/:id', authenticateToken, updateChatbotIntent);
 router.delete('/chatbot-intents/:id', authenticateToken, deleteChatbotIntent);
