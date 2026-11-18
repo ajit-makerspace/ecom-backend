@@ -223,6 +223,16 @@ export const deleteCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Category not found.' });
     }
 
+    // Cascade inactive status to child subcategories and products
+    await db.query(
+      `UPDATE subcategories SET status = 2, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+      [id]
+    );
+    await db.query(
+      `UPDATE products SET status = 2, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+      [id]
+    );
+
     return res.json({
       success: true,
       message: `Category ${id} deleted successfully.`,
@@ -288,7 +298,10 @@ export const createSubCategory = async (req, res) => {
       ? rawCode
       : await getNextSubCategoryCode();
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const statusInt =
+      String(status || 'Active').toLowerCase() === 'active' || status === 1 || status === '1'
+        ? 1
+        : 2;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
     let parentId = categoryId ? parseInt(categoryId, 10) : null;
@@ -352,7 +365,12 @@ export const updateSubCategory = async (req, res) => {
     const slug = `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
     const rawCode = String(code || '').replace(/\D/g, '');
     const finalCode = rawCode.length === 4 ? rawCode : '2001';
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const statusInt =
+      typeof status === 'number'
+        ? status
+        : String(status || 'Active').toLowerCase() === 'active' || String(status) === '1'
+        ? 1
+        : 2;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
     let parentId = categoryId ? parseInt(categoryId, 10) : null;
@@ -387,9 +405,9 @@ export const updateSubCategory = async (req, res) => {
     }
 
     // Cascade inactive status to child products
-    if (statusInt === 0) {
+    if (statusInt === 2 || statusInt === 0) {
       await db.query(
-        `UPDATE products SET status = 0, updated_at = NOW() WHERE sub_category_id = $1 AND status != 2`,
+        `UPDATE products SET status = 2, updated_at = NOW() WHERE sub_category_id = $1 AND status != 2`,
         [id]
       );
     }
@@ -422,6 +440,12 @@ export const deleteSubCategory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Sub-category not found.' });
     }
 
+    // Cascade inactive status to child products
+    await db.query(
+      `UPDATE products SET status = 2, updated_at = NOW() WHERE sub_category_id = $1 AND status != 2`,
+      [id]
+    );
+
     return res.json({
       success: true,
       message: `Sub-category ${id} deleted successfully.`,
@@ -453,9 +477,9 @@ export const bulkImportCategories = async (req, res) => {
     const modules = modulesRes.rows;
 
     const categoriesRes = await client.query('SELECT id, name, module_id FROM categories WHERE status != 2');
-    const existingCategories = new Map(); // key: normalizedName -> entry
+    const existingCategories = new Map(); // key: moduleId_normalizedName -> entry
     for (const c of categoriesRes.rows) {
-      existingCategories.set(normalizeName(c.name), c);
+      existingCategories.set(`${c.module_id || 'null'}_${normalizeName(c.name)}`, c);
     }
     const csvSeenCategories = new Map();
 
@@ -472,18 +496,7 @@ export const bulkImportCategories = async (req, res) => {
 
       const normalized = normalizeName(cleanName);
 
-      // Intra-CSV duplicate check
-      if (csvSeenCategories.has(normalized)) {
-        const priorLine = csvSeenCategories.get(normalized);
-        rowErrors.push({
-          rowNumber,
-          productName: cleanName,
-          message: `Conflict: Duplicate category "${cleanName}" within CSV (already defined on line ${priorLine}).`,
-        });
-        continue;
-      }
-
-      // Resolve parent module
+      // Resolve parent module first
       const rawModName = item.moduleName || item['Module Name'] || item['Parent Module'] || '';
       let parentModId = item.moduleId ? parseInt(item.moduleId, 10) : null;
       let parentModName = rawModName ? String(rawModName).trim() : '';
@@ -515,29 +528,30 @@ export const bulkImportCategories = async (req, res) => {
         }
       }
 
-      // Check DB conflict: already exists under a DIFFERENT module?
-      if (existingCategories.has(normalized)) {
-        const existingCat = existingCategories.get(normalized);
-        if (existingCat.module_id && parentModId && String(existingCat.module_id) !== String(parentModId)) {
-          const existingMod = modules.find((m) => String(m.id) === String(existingCat.module_id));
-          const existingModName = existingMod ? existingMod.name : `Module #${existingCat.module_id}`;
-          rowErrors.push({
-            rowNumber,
-            productName: cleanName,
-            message: `Conflict: Category "${cleanName}" already belongs to Module "${existingModName}", but CSV line specifies Module "${parentModName}".`,
-          });
-          continue;
-        }
+      const categoryKey = `${parentModId || 'null'}_${normalized}`;
 
+      // Intra-CSV duplicate check within the same module
+      if (csvSeenCategories.has(categoryKey)) {
+        const priorLine = csvSeenCategories.get(categoryKey);
         rowErrors.push({
           rowNumber,
           productName: cleanName,
-          message: `Conflict: Category "${cleanName}" already exists in the catalog.`,
+          message: `Conflict: Duplicate category "${cleanName}" within CSV for Module "${parentModName}" (already defined on line ${priorLine}).`,
         });
         continue;
       }
 
-      csvSeenCategories.set(normalized, rowNumber);
+      // Check DB conflict: already exists under the SAME module
+      if (existingCategories.has(categoryKey)) {
+        rowErrors.push({
+          rowNumber,
+          productName: cleanName,
+          message: `Conflict: Category "${cleanName}" already exists in Module "${parentModName}".`,
+        });
+        continue;
+      }
+
+      csvSeenCategories.set(categoryKey, rowNumber);
 
       await client.query('SAVEPOINT import_category_row');
 
@@ -550,7 +564,10 @@ export const bulkImportCategories = async (req, res) => {
           ? rawCode
           : await getNextCategoryCode(client);
 
-        const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+        const statusInt =
+          String(item.status || 'Active').toLowerCase() === 'active' || item.status === 1 || item.status === '1'
+            ? 1
+            : 2;
         const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
 
         const insertRes = await client.query(
@@ -621,9 +638,9 @@ export const bulkImportSubCategories = async (req, res) => {
     const categories = categoriesRes.rows;
 
     const subcategoriesRes = await client.query('SELECT id, name, category_id FROM subcategories WHERE status != 2');
-    const existingSubcategories = new Map(); // key: normalizedName -> entry
+    const existingSubcategories = new Map(); // key: categoryId_normalizedName -> entry
     for (const s of subcategoriesRes.rows) {
-      existingSubcategories.set(normalizeName(s.name), s);
+      existingSubcategories.set(`${s.category_id}_${normalizeName(s.name)}`, s);
     }
     const csvSeenSubcategories = new Map();
 
@@ -640,18 +657,7 @@ export const bulkImportSubCategories = async (req, res) => {
 
       const normalized = normalizeName(cleanName);
 
-      // Intra-CSV duplicate check
-      if (csvSeenSubcategories.has(normalized)) {
-        const priorLine = csvSeenSubcategories.get(normalized);
-        rowErrors.push({
-          rowNumber,
-          productName: cleanName,
-          message: `Conflict: Duplicate sub-category "${cleanName}" within CSV (already defined on line ${priorLine}).`,
-        });
-        continue;
-      }
-
-      // Resolve parent category
+      // Resolve parent category first
       const rawCatName = item.categoryName || item['Parent Category'] || item['Category Name'] || 'General';
       let parentCatId = item.categoryId ? parseInt(item.categoryId, 10) : null;
       let parentCatName = rawCatName ? String(rawCatName).trim() : 'General';
@@ -689,29 +695,30 @@ export const bulkImportSubCategories = async (req, res) => {
         }
       }
 
-      // Check DB conflict: already exists under a DIFFERENT parent category?
-      if (existingSubcategories.has(normalized)) {
-        const existingSub = existingSubcategories.get(normalized);
-        if (String(existingSub.category_id) !== String(parentCatId)) {
-          const parentCat = categories.find((c) => String(c.id) === String(existingSub.category_id));
-          const existingParentName = parentCat ? parentCat.name : `Category #${existingSub.category_id}`;
-          rowErrors.push({
-            rowNumber,
-            productName: cleanName,
-            message: `Conflict: Sub-category "${cleanName}" already belongs to Category "${existingParentName}", but CSV line specifies Category "${parentCatName}".`,
-          });
-          continue;
-        }
+      const subKey = `${parentCatId}_${normalized}`;
 
+      // Intra-CSV duplicate check within the same category
+      if (csvSeenSubcategories.has(subKey)) {
+        const priorLine = csvSeenSubcategories.get(subKey);
         rowErrors.push({
           rowNumber,
           productName: cleanName,
-          message: `Conflict: Sub-category "${cleanName}" already exists in the catalog.`,
+          message: `Conflict: Duplicate sub-category "${cleanName}" within CSV for Category "${parentCatName}" (already defined on line ${priorLine}).`,
         });
         continue;
       }
 
-      csvSeenSubcategories.set(normalized, rowNumber);
+      // Check DB conflict: already exists under the SAME parent category
+      if (existingSubcategories.has(subKey)) {
+        rowErrors.push({
+          rowNumber,
+          productName: cleanName,
+          message: `Conflict: Sub-category "${cleanName}" already exists in Category "${parentCatName}".`,
+        });
+        continue;
+      }
+
+      csvSeenSubcategories.set(subKey, rowNumber);
 
       await client.query('SAVEPOINT import_subcategory_row');
 
@@ -723,7 +730,10 @@ export const bulkImportSubCategories = async (req, res) => {
           ? rawCode
           : await getNextSubCategoryCode(client);
 
-        const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+        const statusInt =
+          String(item.status || 'Active').toLowerCase() === 'active' || item.status === 1 || item.status === '1'
+            ? 1
+            : 2;
         const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
 
         const insertRes = await client.query(
@@ -792,7 +802,10 @@ export const createCategory = async (req, res) => {
       ? rawCode
       : await getNextCategoryCode();
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const statusInt =
+      String(status || 'Active').toLowerCase() === 'active' || status === 1 || status === '1'
+        ? 1
+        : 2;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
     const { rows } = await db.query(
@@ -832,7 +845,12 @@ export const updateCategory = async (req, res) => {
     const slug = `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
     const rawCode = String(code || '').replace(/\D/g, '');
     const finalCode = rawCode.length === 4 ? rawCode : '1001';
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const statusInt =
+      typeof status === 'number'
+        ? status
+        : String(status || 'Active').toLowerCase() === 'active' || String(status) === '1'
+        ? 1
+        : 2;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
     const { rows } = await db.query(
@@ -848,13 +866,13 @@ export const updateCategory = async (req, res) => {
     }
 
     // Cascade inactive status to child subcategories and products
-    if (statusInt === 0) {
+    if (statusInt === 2 || statusInt === 0) {
       await db.query(
-        `UPDATE subcategories SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+        `UPDATE subcategories SET status = 2, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
         [id]
       );
       await db.query(
-        `UPDATE products SET status = 0, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
+        `UPDATE products SET status = 2, updated_at = NOW() WHERE category_id = $1 AND status != 2`,
         [id]
       );
     }

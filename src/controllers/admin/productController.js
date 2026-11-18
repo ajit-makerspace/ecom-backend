@@ -324,9 +324,10 @@ export const createProduct = async (req, res) => {
 
     const statusInt =
       String(status || 'Active').toLowerCase() === 'active' ||
-      status === 1
+      status === 1 ||
+      status === '1'
         ? 1
-        : 0;
+        : 2;
 
     const returnableInt =
       returnable !== undefined && returnable !== null
@@ -618,9 +619,10 @@ export const updateProduct = async (req, res) => {
 
     const statusInt =
       String(status || 'Active').toLowerCase() === 'active' ||
-      status === 1
+      status === 1 ||
+      status === '1'
         ? 1
-        : 0;
+        : 2;
 
     const returnableInt =
       returnable !== undefined && returnable !== null
@@ -1121,7 +1123,11 @@ export const bulkImportProducts = async (req, res) => {
 
   try {
     const { products, updateExisting: bodyUpdateExisting } = req.body;
-    const updateExisting = Boolean(bodyUpdateExisting || req?.query?.updateExisting === 'true');
+    const updateExisting = bodyUpdateExisting !== undefined
+      ? Boolean(bodyUpdateExisting)
+      : req?.query?.updateExisting !== undefined
+        ? req.query.updateExisting === 'true'
+        : true;
 
     if (!Array.isArray(products) || products.length === 0) {
       return res.status(400).json({
@@ -1157,7 +1163,7 @@ export const bulkImportProducts = async (req, res) => {
       WHERE status != 2
     `);
     const existingProductsResult = await client.query(`
-      SELECT id, name, sku, category_id, sub_category_id
+      SELECT id, name, sku, module_id, category_id, sub_category_id
       FROM products
       WHERE status != 2
     `);
@@ -1174,7 +1180,7 @@ export const bulkImportProducts = async (req, res) => {
       if (prod.sku) {
         existingSkus.set(normalizeName(prod.sku), { id: prod.id, name: prod.name, sku: prod.sku });
       }
-      const pKey = `${prod.category_id}_${prod.sub_category_id || 'null'}_${normalizeName(prod.name)}`;
+      const pKey = `${prod.module_id || 'null'}_${prod.category_id}_${prod.sub_category_id || 'null'}_${normalizeName(prod.name)}`;
       existingProductKeys.set(pKey, { id: prod.id, name: prod.name, sku: prod.sku });
     }
 
@@ -1262,44 +1268,21 @@ export const bulkImportProducts = async (req, res) => {
           ? String(rawCategoryName).trim()
           : 'General';
 
-        let category = findByName(
-          categories,
-          cleanCategoryName,
-          'Category'
+        const normalizedCategoryName = normalizeName(cleanCategoryName);
+
+        // Find existing category matching name (shared globally across modules)
+        let category = categories.find(
+          (c) => normalizeName(c.name) === normalizedCategoryName
         );
 
-        if (category) {
-          // Conflict Check: Category exists but belongs to a different Module
-          if (
-            category.module_id &&
-            moduleId &&
-            String(category.module_id) !== String(moduleId)
-          ) {
-            const existingMod = modules.find(
-              (m) => String(m.id) === String(category.module_id)
-            );
-            const existingModName = existingMod ? existingMod.name : `Module #${category.module_id}`;
-            throw new Error(
-              `Conflict: Category "${category.name}" already belongs to Module "${existingModName}", but CSV line specifies Module "${String(rawModuleName).trim()}".`
-            );
-          }
-
-          // If category previously had no module assigned and module is provided, attach it
-          if (!category.module_id && moduleId) {
-            await client.query(
-              `UPDATE categories SET module_id = $1 WHERE id = $2`,
-              [moduleId, category.id]
-            );
-            category.module_id = moduleId;
-          }
-        } else {
-          // Category does not exist -> Create under moduleId
+        if (!category) {
+          // Category does not exist -> Create new unique category
           const catSlug = `${slugify(cleanCategoryName)}-${Date.now().toString().slice(-4)}-${i}-${Math.floor(Math.random() * 1000)}`;
           const catRes = await client.query(
-            `INSERT INTO categories (module_id, name, slug, status)
-             VALUES ($1, $2, $3, 1)
-             RETURNING id, name, module_id`,
-            [moduleId, cleanCategoryName, catSlug]
+            `INSERT INTO categories (name, slug, status)
+             VALUES ($1, $2, 1)
+             RETURNING id, name`,
+            [cleanCategoryName, catSlug]
           );
           category = catRes.rows[0];
           categories.push(category);
@@ -1308,7 +1291,7 @@ export const bulkImportProducts = async (req, res) => {
 
         const categoryId = category.id;
 
-        // 3. Resolve Subcategory (reuse if exists under category, detect parent category conflicts)
+        // 3. Resolve Subcategory (scoped to parent categoryId)
         const rawSubcategoryName = getValue(
           item,
           'subCategoryName',
@@ -1335,22 +1318,7 @@ export const bulkImportProducts = async (req, res) => {
             // Already present under this category -> Reuse!
             subCategoryId = subcategory.id;
           } else {
-            // Conflict Check: Does subcategory already belong to a DIFFERENT parent category?
-            const conflictingSubcat = subcategories.find(
-              (s) => normalizeName(s.name) === normalizedSubName
-            );
-
-            if (conflictingSubcat) {
-              const parentCat = categories.find(
-                (c) => String(c.id) === String(conflictingSubcat.category_id)
-              );
-              const parentCatName = parentCat ? parentCat.name : `Category #${conflictingSubcat.category_id}`;
-              throw new Error(
-                `Conflict: Sub-category "${cleanSubcatName}" already belongs to Category "${parentCatName}", but CSV line specifies Category "${category.name}".`
-              );
-            }
-
-            // Subcategory does not exist -> Create new under categoryId
+            // Subcategory does not exist under this category -> Create new under categoryId
             const subSlug = `${slugify(cleanSubcatName)}-${Date.now().toString().slice(-4)}-${i}-${Math.floor(Math.random() * 1000)}`;
             const subRes = await client.query(
               `INSERT INTO subcategories (category_id, name, slug, status)
@@ -1398,8 +1366,8 @@ export const bulkImportProducts = async (req, res) => {
           sku = `SKU-IMP-${Date.now()}-${i}`;
         }
 
-        // 5. Product Name Duplicate Conflict Check in same Category/Subcategory
-        productKey = `${categoryId}_${subCategoryId || 'null'}_${normalizeName(name)}`;
+        // 5. Product Name Duplicate Conflict Check in same Module/Category/Subcategory
+        productKey = `${moduleId || 'null'}_${categoryId}_${subCategoryId || 'null'}_${normalizeName(name)}`;
 
         if (csvSeenProductKeys.has(productKey)) {
           const priorLine = csvSeenProductKeys.get(productKey);
@@ -1559,8 +1527,8 @@ export const bulkImportProducts = async (req, res) => {
 
         if (['active', '1'].includes(rawStatus)) {
           statusInt = 1;
-        } else if (['inactive', '0'].includes(rawStatus)) {
-          statusInt = 0;
+        } else if (['inactive', '0', '2'].includes(rawStatus)) {
+          statusInt = 2;
         } else {
           throw new Error(
             `Status "${rawStatus}" is invalid. Use Active or Inactive.`
@@ -1591,12 +1559,24 @@ export const bulkImportProducts = async (req, res) => {
           }
         }
 
-        // 10. Prepare description and slug.
+        // 10. Prepare description, slug, and isKit flag
         const description = String(
           getValue(item, 'description', 'Description')
         ).trim();
 
         const slug = `${slugify(name)}-${Date.now()}-${i}-${Math.floor(Math.random() * 1000)}`;
+
+        // Automatically mark is_kit = true if category is "Kits" (or explicit isKit column is truthy)
+        const rawIsKit = getValue(item, 'isKit', 'is_kit', 'Is Kit', 'IsKit');
+        const isCategoryKits =
+          normalizeName(cleanCategoryName) === 'kits' ||
+          normalizeName(category?.name) === 'kits';
+        const isExplicitKit =
+          !isBlank(rawIsKit) &&
+          (String(rawIsKit).toLowerCase() === 'true' ||
+            String(rawIsKit) === '1' ||
+            String(rawIsKit).toLowerCase() === 'yes');
+        const isKit = isCategoryKits || isExplicitKit;
 
         let prod;
 
@@ -1617,8 +1597,9 @@ export const bulkImportProducts = async (req, res) => {
               images = $11,
               status = $12,
               returnable = $13,
+              is_kit = $14,
               updated_at = NOW()
-            WHERE id = $14
+            WHERE id = $15
             RETURNING
               id,
               module_id AS "moduleId",
@@ -1635,7 +1616,8 @@ export const bulkImportProducts = async (req, res) => {
               image_url AS "image",
               images,
               status,
-              returnable`,
+              returnable,
+              is_kit AS "isKit"`,
             [
               moduleId,
               categoryId,
@@ -1650,6 +1632,7 @@ export const bulkImportProducts = async (req, res) => {
               JSON.stringify(uniqueAdditionalImages),
               statusInt,
               returnableInt,
+              isKit,
               existingSkuProduct.id,
             ]
           );
@@ -1672,11 +1655,12 @@ export const bulkImportProducts = async (req, res) => {
               image_url,
               images,
               status,
-              returnable
+              returnable,
+              is_kit
             )
             VALUES (
               $1, $2, $3, $4, $5, $6, $7,
-              $8, $9, $10, $11, $12, $13, $14, $15
+              $8, $9, $10, $11, $12, $13, $14, $15, $16
             )
             RETURNING
               id,
@@ -1694,7 +1678,8 @@ export const bulkImportProducts = async (req, res) => {
               image_url AS "image",
               images,
               status,
-              returnable`,
+              returnable,
+              is_kit AS "isKit"`,
             [
               moduleId,
               categoryId,
@@ -1711,6 +1696,7 @@ export const bulkImportProducts = async (req, res) => {
               JSON.stringify(uniqueAdditionalImages),
               statusInt,
               returnableInt,
+              isKit,
             ]
           );
           prod = insertResult.rows[0];
@@ -1738,6 +1724,7 @@ export const bulkImportProducts = async (req, res) => {
           prod.returnable !== undefined
             ? Number(prod.returnable)
             : 1;
+        prod.isKit = Boolean(prod.isKit);
 
         createdProducts.push({
           ...prod,

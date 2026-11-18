@@ -12,7 +12,13 @@ export const getDashboardAnalytics = async (req, res) => {
         COUNT(CASE WHEN status IN ('Pending', 'Processing') THEN 1 END)::int AS pending_orders
       FROM orders
     `);
-    const custRes = await db.query('SELECT COUNT(*)::int AS count FROM users WHERE status = 1');
+    const custRes = await db.query(`
+      SELECT COUNT(*)::int AS count
+      FROM users
+      WHERE status = 1
+        AND LOWER(email) NOT IN (SELECT LOWER(email) FROM admin_users)
+        AND (password_hash IS NULL OR password_hash != 'LINKED_ADMIN')
+    `);
 
     // Category distribution based on real product sales
     const categoryDistributionRes = await db.query(`
@@ -113,7 +119,10 @@ export const getDashboardAnalytics = async (req, res) => {
       SELECT
         COUNT(CASE WHEN DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE) THEN 1 END)::int AS cust_this_month,
         COUNT(CASE WHEN DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') THEN 1 END)::int AS cust_last_month
-      FROM users WHERE status = 1
+      FROM users
+      WHERE status = 1
+        AND LOWER(email) NOT IN (SELECT LOWER(email) FROM admin_users)
+        AND (password_hash IS NULL OR password_hash != 'LINKED_ADMIN')
     `);
 
     const g = growthRes.rows[0];

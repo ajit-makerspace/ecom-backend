@@ -290,7 +290,6 @@ export const createAdminUser = async (req, res) => {
         roleName,
         loginUrl,
       });
-      console.log(`[AdminAuth] Credentials email dispatched to ${cleanEmail}`);
     } catch (emailErr) {
       console.error(`[AdminAuth] Failed to dispatch credentials email to ${cleanEmail}:`, emailErr.message);
     }

@@ -1,29 +1,10 @@
 import db from '../../config/db.js';
 
 /**
- * Ensure the product_reviews table exists in PostgreSQL
+ * Sync products.reviews_count and products.rating with real approved reviews
  */
 export async function ensureReviewsTable() {
   try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS product_reviews (
-        id SERIAL PRIMARY KEY,
-        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-        user_name VARCHAR(150),
-        user_email VARCHAR(255),
-        rating NUMERIC(2, 1) NOT NULL CHECK (rating >= 1 AND rating <= 5),
-        title VARCHAR(255),
-        comment TEXT NOT NULL,
-        status SMALLINT NOT NULL DEFAULT 1,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_product_reviews_prod ON product_reviews(product_id);
-      CREATE INDEX IF NOT EXISTS idx_product_reviews_user ON product_reviews(user_id);
-    `);
-
-    // Sync products.reviews_count and products.rating with real approved reviews
     await db.query(`
       UPDATE products p
       SET 
@@ -45,7 +26,7 @@ export async function ensureReviewsTable() {
       WHERE id NOT IN (SELECT DISTINCT product_id FROM product_reviews WHERE status = 1);
     `);
   } catch (err) {
-    console.error('Error ensuring product_reviews table:', err.message);
+    console.error('Error syncing reviews summary:', err.message);
   }
 }
 

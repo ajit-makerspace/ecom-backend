@@ -34,6 +34,8 @@ export const getCustomers = async (req, res) => {
         FROM orders
         GROUP BY user_id
       ) o ON u.id = o.user_id
+      WHERE LOWER(u.email) NOT IN (SELECT LOWER(email) FROM admin_users)
+        AND (u.password_hash IS NULL OR u.password_hash != 'LINKED_ADMIN')
       ORDER BY u.created_at DESC
     `);
 
