@@ -24,7 +24,9 @@ import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 import shippingRoutes from './routes/admin/shippingRoutes.js';
 import warehouseRoutes from './routes/admin/warehouseRoutes.js';
 import blogsRoutes from './routes/admin/blogsRoutes.js';
-import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
+// import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
+import adminPrintRequestRoutes from './routes/admin/adminPrintRequestRoutes.js';
+
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -44,7 +46,7 @@ import printRequestRoutes from './routes/user/printRequestRoutes.js';
 import ftpService from './services/ftpStorageService.js';
 import storageService from './services/storageService.js';
 import { startFtpSyncCron, stopFtpSyncCron } from './services/ftpSyncCron.js';
-
+import printRequestPaymentRoutes from './routes/user/printRequestPaymentRoutes.js';
 import db from './config/db.js';
 
 const app = express();
@@ -61,7 +63,10 @@ app.set('etag', false);
 
 app.use(
   cors({
-    origin: 'http://localhost:3000',
+    origin: [
+      'http://localhost:3000',
+      'https://test.makerspaceshop.com',
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
@@ -377,6 +382,9 @@ app.use(
 
 // Admin Management API Routes (with rate-limiting on auth endpoints)
 app.use('/api/admin/auth', authLimiter, authRoutes);
+
+app.use('/api/admin', adminPrintRequestRoutes);
+// app.use('/api/admin', adminPrototypeRoutes);
 app.use('/api/admin', moduleRoutes);
 app.use('/api/admin', categoryRoutes);
 app.use('/api/admin', productRoutes);
@@ -409,6 +417,7 @@ app.use('/api/user', userPaymentRoutes);
 app.use('/api/user', userCompetitionRoute);
 app.use('/api/user', userPrintRequestRoutes);
 app.use('/api/user', userBlogsRoute);
+app.use('/api/user', printRequestPaymentRoutes);
 
 
 // Universal Refresh & Logout API Endpoints

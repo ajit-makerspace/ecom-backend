@@ -19,6 +19,6 @@ const uploadFields = prototypeMulterUpload.fields([
 router.post('/print-requests', optionalAuth, uploadFields, submitPrintRequest);
 
 // Customer fetch their own submitted requests
-router.get('/print-requests/my', authenticateToken, getMyPrintRequests);
+router.get('/print-requests', authenticateToken, getMyPrintRequests);
 
 export default router;

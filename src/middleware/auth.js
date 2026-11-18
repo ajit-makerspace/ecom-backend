@@ -163,24 +163,102 @@ export async function optionalAuth(req, res, next) {
 }
 
 // RBAC Middleware: Require specific user_type role(s)
+// export function requireRole(allowedRoles = []) {
+//   const rolesArray = (Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]).map((r) => String(r));
+
+//   return (req, res, next) => {
+//     if (!req.user) {
+//       return res.status(401).json({ success: false, message: 'Unauthenticated.' });
+//     }
+
+//     const userTypeStr = String(req.user.user_type || req.user.role || '');
+
+//     if (userTypeStr === '1' || req.user.roleName === 'SUPER_ADMIN' || rolesArray.includes(userTypeStr) || rolesArray.length === 0) {
+//       return next();
+//     }
+
+//     return res.status(403).json({
+//       success: false,
+//       message: `Access denied. Requires one of roles: ${rolesArray.map((r) => USER_TYPES[r] || r).join(', ')}.`,
+//     });
+//   };
+// }
+
+
+// export function requireRole(allowedRoles = []) {
+//   const rolesArray = (
+//     Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]
+//   ).map(String);
+
+//   return (req, res, next) => {
+//     if (!req.user) {
+//       return res.status(401).json({
+//         success: false,
+//         message: 'Unauthenticated.',
+//       });
+//     }
+
+//     const userType = String(req.user.user_type ?? '');
+//     const roleName = String(
+//       req.user.roleName || USER_TYPES[userType] || ''
+//     );
+
+//     const isAllowed =
+//       rolesArray.length === 0 ||
+//       rolesArray.includes(userType) ||
+//       rolesArray.includes(roleName);
+
+//     if (!isAllowed) {
+//       return res.status(403).json({
+//         success: false,
+//         message: `Access denied. Requires one of roles: ${rolesArray
+//           .map((role) => USER_TYPES[role] || role)
+//           .join(', ')}.`,
+//       });
+//     }
+
+//     next();
+//   };
+// }
+
+
 export function requireRole(allowedRoles = []) {
-  const rolesArray = (Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]).map((r) => String(r));
+  const rolesArray = (
+    Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles]
+  ).map((role) => String(role));
 
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Unauthenticated.' });
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthenticated.',
+      });
     }
 
-    const userTypeStr = String(req.user.user_type || req.user.role || '');
+    const userType = String(
+      req.user.user_type ?? req.user.role ?? ''
+    );
 
-    if (userTypeStr === '1' || req.user.roleName === 'SUPER_ADMIN' || rolesArray.includes(userTypeStr) || rolesArray.length === 0) {
-      return next();
+    const roleName = String(
+      req.user.roleName || USER_TYPES[userType] || ''
+    );
+
+    const isAllowed =
+      rolesArray.length === 0 ||
+      userType === '1' ||
+      roleName === 'SUPER_ADMIN' ||
+      rolesArray.includes(userType) ||
+      rolesArray.includes(roleName);
+
+    if (!isAllowed) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Requires one of roles: ${rolesArray
+          .map((role) => USER_TYPES[role] || role)
+          .join(', ')}.`,
+      });
     }
-
-    return res.status(403).json({
-      success: false,
-      message: `Access denied. Requires one of roles: ${rolesArray.map((r) => USER_TYPES[r] || r).join(', ')}.`,
-    });
+    return next();
   };
 }
 
