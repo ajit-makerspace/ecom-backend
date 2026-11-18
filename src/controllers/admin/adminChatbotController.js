@@ -281,3 +281,163 @@ export async function toggleChatbotIntentStatus(req, res) {
     return res.status(500).json({ success: false, message: 'Failed to toggle intent status.' });
   }
 }
+
+/**
+ * POST /api/admin/chatbot-intents/bulk-import
+ * Bulk import chatbot intents / FAQs from parsed CSV data
+ */
+export async function bulkImportChatbotIntents(req, res) {
+  const client = await db.pool.connect();
+  const rowErrors = [];
+  let importedCount = 0;
+  let updatedCount = 0;
+
+  try {
+    const rawList = req.body?.intents || req.body?.data || (Array.isArray(req.body) ? req.body : []);
+    const replaceAll = Boolean(req.body?.replaceAll);
+
+    if (!Array.isArray(rawList) || rawList.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No intent records provided for bulk import.',
+      });
+    }
+
+    await client.query('BEGIN');
+
+    // If replaceAll is checked, clear existing intents first
+    if (replaceAll) {
+      await client.query('DELETE FROM chatbot_intents');
+    }
+
+    for (let i = 0; i < rawList.length; i++) {
+      const item = rawList[i];
+      const rowNum = item.__csvRowNumber || i + 1;
+
+      const title = String(item.title || item.question || '').trim();
+      const answer = String(item.answer || item.response || '').trim();
+      const category = String(item.category || 'General').trim() || 'General';
+
+      if (!title) {
+        rowErrors.push(`Row ${rowNum}: Question / Title is required.`);
+        continue;
+      }
+
+      if (!answer) {
+        rowErrors.push(`Row ${rowNum}: Answer response is required.`);
+        continue;
+      }
+
+      // Keywords normalization
+      let keywordsArr = [];
+      if (Array.isArray(item.keywords)) {
+        keywordsArr = item.keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean);
+      } else if (typeof item.keywords === 'string') {
+        const rawKw = item.keywords.trim();
+        if (rawKw.startsWith('{') && rawKw.endsWith('}')) {
+          keywordsArr = rawKw
+            .slice(1, -1)
+            .split(',')
+            .map((k) => k.replace(/^"|"$/g, '').trim().toLowerCase())
+            .filter(Boolean);
+        } else {
+          keywordsArr = rawKw.split(/[,|]/).map((k) => k.trim().toLowerCase()).filter(Boolean);
+        }
+      }
+
+      const actionLabel = item.action_label || item.actionLabel ? String(item.action_label || item.actionLabel).trim() : null;
+      const actionUrl = item.action_url || item.actionUrl ? String(item.action_url || item.actionUrl).trim() : null;
+      const sortOrder = item.sort_order !== undefined && item.sort_order !== null && !isNaN(parseInt(item.sort_order, 10))
+        ? parseInt(item.sort_order, 10)
+        : (item.sortOrder !== undefined && !isNaN(parseInt(item.sortOrder, 10)) ? parseInt(item.sortOrder, 10) : i + 1);
+      const status = item.status !== undefined && (parseInt(item.status, 10) === 0 || item.status === '0' || item.status === false) ? 0 : 1;
+
+      const explicitId = item.id !== undefined && item.id !== null && !isNaN(parseInt(item.id, 10))
+        ? parseInt(item.id, 10)
+        : null;
+
+      if (!replaceAll && explicitId) {
+        // Check if ID exists to update or insert with explicit ID
+        const existCheck = await client.query('SELECT id FROM chatbot_intents WHERE id = $1', [explicitId]);
+        if (existCheck.rows.length > 0) {
+          await client.query(
+            `UPDATE chatbot_intents
+             SET 
+              category = $1,
+              title = $2,
+              answer = $3,
+              keywords = $4,
+              action_label = $5,
+              action_url = $6,
+              sort_order = $7,
+              status = $8,
+              updated_at = NOW()
+             WHERE id = $9`,
+            [category, title, answer, keywordsArr, actionLabel, actionUrl, sortOrder, status, explicitId]
+          );
+          updatedCount++;
+          continue;
+        } else {
+          await client.query(
+            `INSERT INTO chatbot_intents (
+              id, category, title, answer, keywords, action_label, action_url, sort_order, status, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+            [explicitId, category, title, answer, keywordsArr, actionLabel, actionUrl, sortOrder, status]
+          );
+          importedCount++;
+          continue;
+        }
+      }
+
+      // Standard insert (with or without explicit ID during replaceAll)
+      if (replaceAll && explicitId) {
+        await client.query(
+          `INSERT INTO chatbot_intents (
+            id, category, title, answer, keywords, action_label, action_url, sort_order, status, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())`,
+          [explicitId, category, title, answer, keywordsArr, actionLabel, actionUrl, sortOrder, status]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO chatbot_intents (
+            category, title, answer, keywords, action_label, action_url, sort_order, status, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+          [category, title, answer, keywordsArr, actionLabel, actionUrl, sortOrder, status]
+        );
+      }
+      importedCount++;
+    }
+
+    // Align sequence with MAX(id) so subsequent inserts do not collide
+    await client.query(`
+      SELECT setval(
+        pg_get_serial_sequence('chatbot_intents', 'id'),
+        COALESCE((SELECT MAX(id) FROM chatbot_intents), 1)
+      )
+    `);
+
+    await client.query('COMMIT');
+
+    const totalProcessed = importedCount + updatedCount;
+    return res.json({
+      success: true,
+      message: replaceAll
+        ? `Successfully replaced and imported ${importedCount} chatbot intents.`
+        : `Successfully imported ${importedCount} new and updated ${updatedCount} existing intents (${totalProcessed} total).`,
+      importedCount,
+      updatedCount,
+      totalProcessed,
+      errors: rowErrors,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Bulk Import Chatbot Intents Error:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to bulk import chatbot intents.',
+      errors: rowErrors,
+    });
+  } finally {
+    client.release();
+  }
+}
