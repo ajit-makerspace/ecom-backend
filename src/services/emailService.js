@@ -32,10 +32,13 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER || '',
     pass: process.env.SMTP_PASS || '',
   },
+  connectionTimeout: 5000,
+  greetingTimeout: 5000,
+  socketTimeout: 8000,
 });
 
-const SENDER_EMAIL = process.env.SMTP_FROM || 'makerspacemasters.com';
-const SENDER_NAME = process.env.SMTP_FROM_NAME || 'Makerspace Masters';
+const SENDER_EMAIL = process.env.SMTP_FROM || 'makerspaceshop.com';
+const SENDER_NAME = process.env.SMTP_FROM_NAME || 'Makerspace Masters Shop';
 
 /**
  * Generate standard HTML template layout
@@ -177,9 +180,9 @@ function getEmailLayout({ title, previewText, bodyContent }) {
         ${bodyContent}
       </div>
       <div class="footer">
-        <p style="margin: 0 0 6px 0;">This email was sent by <strong>Makerspace Masters</strong>.</p>
+        <p style="margin: 0 0 6px 0;">This email was sent by <strong>Makerspace Masters Shop</strong>.</p>
         <p style="margin: 0 0 6px 0;">For inquiries or security assistance, contact <a href="mailto:${SENDER_EMAIL}">${SENDER_EMAIL}</a>.</p>
-        <p style="margin: 0; color: #cbd5e1;">© ${new Date().getFullYear()} Makerspace Masters. All rights reserved.</p>
+        <p style="margin: 0; color: #cbd5e1;">© ${new Date().getFullYear()} Makerspace Masters Shop. All rights reserved.</p>
       </div>
     </div>
   </div>
@@ -382,7 +385,7 @@ export async function sendOrderConfirmationEmail({
   shippingCountry = 'India',
   createdAt = new Date(),
 }) {
-  const subject = `Order Confirmed #${orderNumber} - Makerspace Masters`;
+  const subject = `Order Confirmed #${orderNumber} - Makerspace Masters Shop`;
   const formatINR = (val) =>
     `₹${parseFloat(val || 0).toLocaleString('en-IN', {
       minimumFractionDigits: 2,
@@ -530,7 +533,7 @@ export async function sendOrderConfirmationEmail({
 
     <p style="font-size: 12px; color: #64748b; margin-top: 24px; margin-bottom: 0; line-height: 1.6;">
       Need any help with your shipment? Reach out to us at <a href="mailto:${SENDER_EMAIL}" style="color: #0071e3; text-decoration: underline;">${SENDER_EMAIL}</a>.<br>
-      Thank you for shopping with <strong>Makerspace Masters</strong>!
+      Thank you for shopping with <strong>Makerspace Masters Shop</strong>!
     </p>
   `;
 

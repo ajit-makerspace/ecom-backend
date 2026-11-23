@@ -21,6 +21,7 @@ const router = express.Router();
 
 router.get('/search', searchStoreProducts);
 router.get('/products/search', searchStoreProducts);
+router.get('/products/kits', getStoreKits);
 router.get('/products', getStoreProducts);
 router.get('/products/:id', getStoreProductById);
 router.get('/products/:id/reviews', getProductReviews);

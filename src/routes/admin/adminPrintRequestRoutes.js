@@ -28,7 +28,10 @@ import {
 
 import {
   getAdminPrintRequests,
+  getAdminPrintRequestById,
   updateAdminPrintRequestQuotation,
+  updateAdminPrintRequestStatus,
+  deleteAdminPrintRequest,
 } from '../../controllers/admin/adminPrintRequestController.js';
 
 const router = express.Router();
@@ -39,13 +42,11 @@ router.use(authenticateToken);
 // Only SUPER_ADMIN (1) and 3D (4) can access these routes
 router.use(requireRole([1, 4]));
 
-// Get all print requests for admin
+// Print request management
 router.get('/print-requests', getAdminPrintRequests);
-router.patch(
-  '/print-requests/:id/quotation',
-  authenticateToken,
-  requireRole([1, 4]),
-  updateAdminPrintRequestQuotation
-);
+router.get('/print-requests/:id', getAdminPrintRequestById);
+router.patch('/print-requests/:id/quotation', updateAdminPrintRequestQuotation);
+router.patch('/print-requests/:id/status', updateAdminPrintRequestStatus);
+router.delete('/print-requests/:id', deleteAdminPrintRequest);
 
 export default router;

@@ -24,7 +24,7 @@ import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 import shippingRoutes from './routes/admin/shippingRoutes.js';
 import warehouseRoutes from './routes/admin/warehouseRoutes.js';
 import blogsRoutes from './routes/admin/blogsRoutes.js';
-// import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
+import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
 import adminPrintRequestRoutes from './routes/admin/adminPrintRequestRoutes.js';
 
 
@@ -61,18 +61,49 @@ app.set('etag', false);
 // Global Middlewares
 // app.use(cors());
 
+// Allowed CORS Origins (Supports localhost, LAN IPs, and production domains)
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3005',
+  'http://localhost:3014',
+  'http://localhost:3015',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'http://127.0.0.1:3005',
+  'http://127.0.0.1:3014',
+  'http://127.0.0.1:3015',
+  'https://makerspaceshop.com',
+  'https://www.makerspaceshop.com',
+  'https://test.makerspaceshop.com',
+  'https://api.makerspaceshop.com',
+  'https://api-test.makerspaceshop.com',
+  'https://test-api.makerspaceshop.com',
+];
+
 app.use(
   cors({
-    origin: [
-      'http://localhost:3000',
-      'https://test.makerspaceshop.com',
-    ],
+    origin: (origin, callback) => {
+      // Allow server-to-server, curl, mobile apps, or same-origin requests with no origin header
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.makerspaceshop.com') ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
       'x-session-id',
+      'x-refresh-token',
+      'X-Requested-With',
     ],
   })
 );
@@ -81,12 +112,16 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// SEC-07: Rate Limiters for brute-force protection
+// SEC-07: Rate Limiters for brute-force protection (Exempts safe GET/HEAD/OPTIONS and session heartbeats)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30, // 30 requests per IP per window
+  max: 60, // 60 sensitive attempts per IP per window
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) =>
+    ['GET', 'HEAD', 'OPTIONS'].includes(req.method) ||
+    req.path.endsWith('/me') ||
+    req.path.endsWith('/logout'),
   message: {
     success: false,
     message: 'Too many authentication attempts from this IP. Please try again after 15 minutes.',
@@ -384,7 +419,7 @@ app.use(
 app.use('/api/admin/auth', authLimiter, authRoutes);
 
 app.use('/api/admin', adminPrintRequestRoutes);
-// app.use('/api/admin', adminPrototypeRoutes);
+app.use('/api/admin', adminPrototypeRoutes);
 app.use('/api/admin', moduleRoutes);
 app.use('/api/admin', categoryRoutes);
 app.use('/api/admin', productRoutes);

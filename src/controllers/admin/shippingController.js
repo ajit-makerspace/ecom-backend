@@ -63,17 +63,18 @@ export const checkServiceability = async (req, res) => {
 // Estimated Delivery Turnaround Time (TAT) and Serviceability Endpoint
 export const getShippingTat = async (req, res) => {
   try {
-    const { deliveryPincode, weight, cod } = req.query;
+    const rawPin = req.query.deliveryPincode || req.query.pincode || req.query.postalCode;
+    const { weight, cod } = req.query;
 
     // 1. Validate deliveryPincode: must be exactly 6 digits
-    if (!deliveryPincode || !/^\d{6}$/.test(String(deliveryPincode).trim())) {
+    if (!rawPin || !/^\d{6}$/.test(String(rawPin).trim())) {
       return res.status(400).json({
         success: false,
         message: 'Invalid delivery PIN code. Please enter a valid 6-digit PIN code.',
       });
     }
 
-    const cleanDeliveryPin = String(deliveryPincode).trim();
+    const cleanDeliveryPin = String(rawPin).trim();
 
     // 2. Validate weight: positive finite number (default: 1)
     let parsedWeight = 1;

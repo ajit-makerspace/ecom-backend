@@ -597,4 +597,156 @@ try {
   }
 };
 
+/**
+ * Get Single Print Request by ID for Admin
+ */
+export const getAdminPrintRequestById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || !/^\d+$/.test(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid print request ID.' });
+    }
+
+    const { rows } = await db.query(
+      `SELECT
+        pr.id,
+        pr.status,
+        pr.material,
+        pr.color_mode AS "colorMode",
+        pr.color_hex AS "colorHex",
+        pr.quality,
+        pr.quantity,
+        pr.scale,
+        pr.units,
+        pr.instructions,
+        pr.created_at AS "createdAt",
+        pr.updated_at AS "updatedAt",
+        json_build_object(
+          'id', u.id,
+          'firstName', u.first_name,
+          'lastName', u.last_name,
+          'email', u.email,
+          'phone', u.phone
+        ) AS customer,
+        json_build_object(
+          'id', mf.id,
+          'filename', mf.filename,
+          'originalName', mf.original_name,
+          'size', mf.file_size,
+          'mimeType', mf.mime_type,
+          'url', CASE WHEN mf.storage_path LIKE '/%' THEN mf.storage_path ELSE '/uploads/' || mf.storage_path END
+        ) AS file,
+        json_build_object(
+          'id', ua.id,
+          'firstName', ua.first_name,
+          'lastName', ua.last_name,
+          'phone', ua.phone,
+          'addressLine1', ua.address_line_1,
+          'addressLine2', ua.address_line_2,
+          'city', ua.city,
+          'state', ua.state,
+          'postalCode', ua.postal_code,
+          'country', ua.country
+        ) AS address,
+        (
+          SELECT json_build_object(
+            'id', q.id,
+            'versionNumber', q.version_number,
+            'amount', q.amount,
+            'materialCost', q.material_cost,
+            'printingCost', q.printing_cost,
+            'shippingCost', q.shipping_cost,
+            'estimatedDays', q.estimated_days,
+            'adminNotes', q.admin_notes,
+            'createdAt', q.created_at
+          )
+          FROM print_request_quotations q
+          WHERE q.print_request_id = pr.id AND q.is_current = TRUE
+          LIMIT 1
+        ) AS quotation
+      FROM print_requests pr
+      LEFT JOIN users u ON u.id = pr.user_id
+      LEFT JOIN media_files mf ON mf.id = pr.media_id
+      LEFT JOIN user_addresses ua ON ua.id = pr.user_address_id
+      WHERE pr.id = $1`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Print request not found.' });
+    }
+
+    return res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    console.error('Get Admin Print Request By ID Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch print request details.' });
+  }
+};
+
+/**
+ * Update Print Request Status for Admin
+ */
+export const updateAdminPrintRequestStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!id || !/^\d+$/.test(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid print request ID.' });
+    }
+
+    if (!status) {
+      return res.status(400).json({ success: false, message: 'Status is required.' });
+    }
+
+    const { rows } = await db.query(
+      `UPDATE print_requests
+       SET status = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, status, updated_at AS "updatedAt"`,
+      [status, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Print request not found.' });
+    }
+
+    return res.json({
+      success: true,
+      message: `Print request status updated to ${status}.`,
+      data: rows[0],
+    });
+  } catch (err) {
+    console.error('Update Print Request Status Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to update print request status.' });
+  }
+};
+
+/**
+ * Delete Print Request for Admin
+ */
+export const deleteAdminPrintRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || !/^\d+$/.test(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid print request ID.' });
+    }
+
+    const { rowCount } = await db.query(
+      'DELETE FROM print_requests WHERE id = $1',
+      [id]
+    );
+
+    if (rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Print request not found.' });
+    }
+
+    return res.json({ success: true, message: 'Print request deleted successfully.' });
+  } catch (err) {
+    console.error('Delete Print Request Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to delete print request.' });
+  }
+};
+
 
