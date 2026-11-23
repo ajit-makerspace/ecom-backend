@@ -368,14 +368,12 @@ export const sendLoginOtp = async (req, res) => {
 
     const responsePayload = {
       success: true,
-      message: emailSent
-        ? `A 6-digit login verification code has been sent to ${cleanEmail}.`
-        : `A 6-digit login verification code has been generated for ${cleanEmail}.`,
+      message: `A 6-digit login verification code has been sent to ${cleanEmail}.`,
     };
 
+    // Server-side audit log for local development troubleshooting (never exposed over client HTTP)
     if (process.env.NODE_ENV !== 'production' || !emailSent) {
-      console.log(`[AUTH OTP DEV NOTICE] Login OTP for ${cleanEmail}: ${otpCode}`);
-      responsePayload.devOtp = otpCode;
+      console.log(`[AUTH OTP AUDIT] Login OTP generated for ${cleanEmail}: ${otpCode}`);
     }
 
     return res.json(responsePayload);
