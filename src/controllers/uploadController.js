@@ -449,6 +449,34 @@ const MODEL_MIME_TYPES = new Set([
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB for images / PDFs
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50 MB for videos
 const MAX_MODEL_SIZE = 100 * 1024 * 1024; // 100 MB for 3D models
+const PRINT_MODEL_EXTENSIONS = new Set([
+  '.zip',
+  '.obj',
+  '.stl',
+  '.3mf',
+]);
+
+const printModelUpload = multer({
+  storage: multer.memoryStorage(),
+
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (!PRINT_MODEL_EXTENSIONS.has(ext)) {
+      return cb(
+        new Error('Please upload a ZIP, OBJ, STL or 3MF model file.'),
+        false
+      );
+    }
+
+    cb(null, true);
+  },
+
+  limits: {
+    fileSize: MAX_MODEL_SIZE,
+    files: 1,
+  },
+});
 
 /**
  * Converts a raster image buffer into optimized WebP format using Jimp.
@@ -588,11 +616,7 @@ const storage = multer.memoryStorage();
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
 
-  console.log('UPLOAD FILE CHECK:', {
-    originalname: file.originalname,
-    extension: ext,
-    mimetype: file.mimetype,
-  });
+ 
 
   if (MODEL_EXTENSIONS.has(ext)) {
     return cb(null, true);
@@ -636,11 +660,26 @@ export const multerUpload = multer({
 //   });
 // };
 
+// export const uploadModel = (req, res, next) => {
+//   multerUpload.fields([
+//     { name: 'model', maxCount: 1 },
+//     { name: 'supportFiles', maxCount: 50 },
+//   ])(req, res, (err) => {
+//     if (!err) return next();
+
+//     const message =
+//       err.code === 'LIMIT_FILE_SIZE'
+//         ? 'File is too large. Maximum size is 100 MB.'
+//         : err.message || 'Upload failed.';
+
+//     return res.status(400).json({
+//       success: false,
+//       message,
+//     });
+//   });
+// };
 export const uploadModel = (req, res, next) => {
-  multerUpload.fields([
-    { name: 'model', maxCount: 1 },
-    { name: 'supportFiles', maxCount: 50 },
-  ])(req, res, (err) => {
+  printModelUpload.single('model')(req, res, (err) => {
     if (!err) return next();
 
     const message =
@@ -654,7 +693,6 @@ export const uploadModel = (req, res, next) => {
     });
   });
 };
-
 
 /**
  * Handle single file upload:

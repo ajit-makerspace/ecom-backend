@@ -1,24 +1,30 @@
-import express from 'express';
-import { optionalAuth, authenticateToken } from '../../middleware/auth.js';
-import {
-  prototypeMulterUpload,
-  submitPrintRequest,
-  getMyPrintRequests,
-} from '../../controllers/prototypeController.js';
+import express from "express";
+import { authenticateToken } from "../../middleware/auth.js";
+
+// import {
+//   printMulterUpload,
+//   submitPrintRequest,
+//   getMyPrintRequests,
+// } from "../../controllers/user/printRequestController.js";
 
 const router = express.Router();
 
-// Upload fields: 'model' (primary 3D file) + 'supportFiles' (textures, materials)
-const uploadFields = prototypeMulterUpload.fields([
-  { name: 'model', maxCount: 1 },
-  { name: 'supportFiles', maxCount: 15 },
-  { name: 'file', maxCount: 1 }, // alias
-]);
+// const uploadFields = printMulterUpload.fields([
+//   { name: "model", maxCount: 1 },
+//   { name: "supportFiles", maxCount: 15 },
+// ]);
 
-// Customer submit print request (supports logged-in users and guests)
-router.post('/print-requests', optionalAuth, uploadFields, submitPrintRequest);
+// router.post(
+//   "/print-requests",
+//   authenticateToken,
+//   uploadFields,
+//   submitPrintRequest
+// );
 
-// Customer fetch their own submitted requests
-router.get('/print-requests', authenticateToken, getMyPrintRequests);
+// router.get(
+//   "/print-requests",
+//   authenticateToken,
+//   getMyPrintRequests
+// );
 
 export default router;
