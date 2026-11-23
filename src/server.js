@@ -24,7 +24,7 @@ import competitionRoutes from "./routes/admin/competitionBannerRoutes.js"
 import shippingRoutes from './routes/admin/shippingRoutes.js';
 import warehouseRoutes from './routes/admin/warehouseRoutes.js';
 import blogsRoutes from './routes/admin/blogsRoutes.js';
-// import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
+import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
 import adminPrintRequestRoutes from './routes/admin/adminPrintRequestRoutes.js';
 import adminPrintMaterialRoutes from './routes/admin/printMaterialRoutes.js'
 import userMaterialRoute from "./routes/user/userMaterialRoute.js";
@@ -41,12 +41,9 @@ import userChatbotRoutes from './routes/user/userChatbotRoutes.js';
 import userPaymentRoutes from './routes/user/userPaymentRoutes.js';
 import userBlogsRoute from './routes/user/userBlogsRoute.js';
 import userPrintRequestRoutes from './routes/user/userPrintRequestRoutes.js';
-import { ensureReviewsTable } from './controllers/user/userReviewController.js';
-import { ensureChatbotTable } from './controllers/admin/adminChatbotController.js';
-import tokenService, { ensureRefreshTokensTable } from './services/tokenService.js';
+import tokenService from './services/tokenService.js';
 import userCompetitionRoute from "./routes/user/userCompetitionRoute.js";
 import printRequestRoutes from './routes/user/printRequestRoutes.js';
-import { ensurePrototypeRequestsTable } from './controllers/prototypeController.js';
 import ftpService from './services/ftpStorageService.js';
 import storageService from './services/storageService.js';
 import { startFtpSyncCron, stopFtpSyncCron } from './services/ftpSyncCron.js';
@@ -65,18 +62,49 @@ app.set('etag', false);
 // Global Middlewares
 // app.use(cors());
 
+// Allowed CORS Origins (Supports localhost, LAN IPs, and production domains)
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3005',
+  'http://localhost:3014',
+  'http://localhost:3015',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'http://127.0.0.1:3005',
+  'http://127.0.0.1:3014',
+  'http://127.0.0.1:3015',
+  'https://makerspaceshop.com',
+  'https://www.makerspaceshop.com',
+  'https://test.makerspaceshop.com',
+  'https://api.makerspaceshop.com',
+  'https://api-test.makerspaceshop.com',
+  'https://test-api.makerspaceshop.com',
+];
+
 app.use(
   cors({
-    origin: [
-      'http://localhost:3000',
-      'https://test.makerspaceshop.com',
-    ],
+    origin: (origin, callback) => {
+      // Allow server-to-server, curl, mobile apps, or same-origin requests with no origin header
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.makerspaceshop.com') ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+        /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
       'x-session-id',
+      'x-refresh-token',
+      'X-Requested-With',
     ],
   })
 );
@@ -85,12 +113,16 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// SEC-07: Rate Limiters for brute-force protection
+// SEC-07: Rate Limiters for brute-force protection (Exempts safe GET/HEAD/OPTIONS and session heartbeats)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30, // 30 requests per IP per window
+  max: 60, // 60 sensitive attempts per IP per window
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) =>
+    ['GET', 'HEAD', 'OPTIONS'].includes(req.method) ||
+    req.path.endsWith('/me') ||
+    req.path.endsWith('/logout'),
   message: {
     success: false,
     message: 'Too many authentication attempts from this IP. Please try again after 15 minutes.',
@@ -477,13 +509,6 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Express Backend Server running on port ${PORT} (Listening on 0.0.0.0 for local network access)`);
   console.log(`🛒 Storefront API: http://localhost:${PORT}/api/user`);
   console.log(`⚙️ Admin API: http://localhost:${PORT}/api/admin`);
-
-  // Ensure storage tables and schema migrations
-  await storageService.ensureMediaFilesSchema();
-  ensureReviewsTable();
-  ensureChatbotTable();
-  ensureRefreshTokensTable();
-  ensurePrototypeRequestsTable();
 
   // Non-blocking background purge of any legacy DB blobs
   storageService.purgeDbBlobs({ batchSize: 20, maxBatches: 2 }).catch((err) => {

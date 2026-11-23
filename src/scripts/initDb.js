@@ -223,6 +223,78 @@ export async function initDb() {
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);');
     await db.query('CREATE INDEX IF NOT EXISTS idx_products_cat_subcat ON products(category_id, sub_category_id);');
 
+    // Cascade Triggers: Inactivate child categories, subcategories, and products when module or category status = 2
+    await db.query(`
+      CREATE OR REPLACE FUNCTION fn_cascade_module_status_inactive()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.status = 2 THEN
+          UPDATE categories
+          SET status = 2, updated_at = NOW()
+          WHERE module_id = NEW.id AND status != 2;
+
+          UPDATE subcategories
+          SET status = 2, updated_at = NOW()
+          WHERE category_id IN (SELECT id FROM categories WHERE module_id = NEW.id) AND status != 2;
+
+          UPDATE products
+          SET status = 2, updated_at = NOW()
+          WHERE (module_id = NEW.id OR category_id IN (SELECT id FROM categories WHERE module_id = NEW.id)) AND status != 2;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_cascade_module_status_inactive ON modules;
+      CREATE TRIGGER trg_cascade_module_status_inactive
+      AFTER UPDATE OF status OR INSERT ON modules
+      FOR EACH ROW
+      WHEN (NEW.status = 2)
+      EXECUTE FUNCTION fn_cascade_module_status_inactive();
+
+      CREATE OR REPLACE FUNCTION fn_cascade_category_status_inactive()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.status = 2 THEN
+          UPDATE subcategories
+          SET status = 2, updated_at = NOW()
+          WHERE category_id = NEW.id AND status != 2;
+
+          UPDATE products
+          SET status = 2, updated_at = NOW()
+          WHERE category_id = NEW.id AND status != 2;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_cascade_category_status_inactive ON categories;
+      CREATE TRIGGER trg_cascade_category_status_inactive
+      AFTER UPDATE OF status OR INSERT ON categories
+      FOR EACH ROW
+      WHEN (NEW.status = 2)
+      EXECUTE FUNCTION fn_cascade_category_status_inactive();
+
+      CREATE OR REPLACE FUNCTION fn_cascade_subcategory_status_inactive()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.status = 2 THEN
+          UPDATE products
+          SET status = 2, updated_at = NOW()
+          WHERE sub_category_id = NEW.id AND status != 2;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_cascade_subcategory_status_inactive ON subcategories;
+      CREATE TRIGGER trg_cascade_subcategory_status_inactive
+      AFTER UPDATE OF status OR INSERT ON subcategories
+      FOR EACH ROW
+      WHEN (NEW.status = 2)
+      EXECUTE FUNCTION fn_cascade_subcategory_status_inactive();
+    `);
+
     // 8b. kit_items (Links kits to constituent products with quantities & specifications)
     await db.query(`
       CREATE TABLE IF NOT EXISTS kit_items (

@@ -5,27 +5,32 @@ import { JWT_SECRET, ACCESS_TOKEN_EXPIRY, REFRESH_TOKEN_EXPIRY_DAYS } from '../c
 import { USER_TYPES, ROLE_PERMISSIONS } from '../config/userTypes.js';
 
 /**
- * Ensure refresh_tokens table exists with necessary indexes
+ * Ensure refresh_tokens table exists with required schema
  */
 export async function ensureRefreshTokensTable() {
   try {
     await db.query(`
       CREATE TABLE IF NOT EXISTS refresh_tokens (
         id SERIAL PRIMARY KEY,
-        user_type SMALLINT NOT NULL DEFAULT 2,
-        user_id UUID NOT NULL,
         token_hash VARCHAR(64) NOT NULL UNIQUE,
+        user_id UUID,
+        admin_user_id UUID,
+        user_type SMALLINT NOT NULL DEFAULT 2,
+        family_id UUID NOT NULL DEFAULT gen_random_uuid(),
+        generation INTEGER NOT NULL DEFAULT 1,
         expires_at TIMESTAMPTZ NOT NULL,
-        revoked_at TIMESTAMPTZ DEFAULT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        is_revoked BOOLEAN NOT NULL DEFAULT FALSE,
+        revoked_at TIMESTAMPTZ,
+        revoked_reason VARCHAR(100),
+        ip_address VARCHAR(45),
         user_agent TEXT,
-        ip_address VARCHAR(45)
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
-      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_type, user_id);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash ON refresh_tokens(token_hash);
+      CREATE INDEX IF NOT EXISTS idx_refresh_tokens_family_id ON refresh_tokens(family_id);
     `);
   } catch (err) {
-    console.error('Error ensuring refresh_tokens table:', err.message);
+    console.error('ensureRefreshTokensTable error:', err.message);
   }
 }
 

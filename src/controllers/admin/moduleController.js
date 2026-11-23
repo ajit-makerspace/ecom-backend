@@ -80,7 +80,10 @@ export const createModule = async (req, res) => {
       ? rawCode
       : await getNextModuleCode();
 
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const statusInt =
+      String(status || 'Active').toLowerCase() === 'active' || status === 1 || status === '1'
+        ? 1
+        : 2;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
     const { rows } = await db.query(
@@ -119,7 +122,12 @@ export const updateModule = async (req, res) => {
     const slug = `${slugify(cleanName)}-${Date.now().toString().slice(-4)}`;
     const rawCode = String(code || '').replace(/\D/g, '');
     const finalCode = rawCode.length === 4 ? rawCode : '1000';
-    const statusInt = String(status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+    const statusInt =
+      typeof status === 'number'
+        ? status
+        : String(status || 'Active').toLowerCase() === 'active' || String(status) === '1'
+        ? 1
+        : 2;
     const imageUrl = image && String(image).trim() ? String(image).trim() : null;
 
     const { rows } = await db.query(
@@ -135,19 +143,19 @@ export const updateModule = async (req, res) => {
     }
 
     // Cascade inactive status to child categories, subcategories, and products
-    if (statusInt === 0) {
+    if (statusInt === 2 || statusInt === 0) {
       await db.query(
-        `UPDATE categories SET status = 0, updated_at = NOW() WHERE module_id = $1 AND status != 2`,
+        `UPDATE categories SET status = 2, updated_at = NOW() WHERE module_id = $1 AND status != 2`,
         [id]
       );
       await db.query(
-        `UPDATE subcategories SET status = 0, updated_at = NOW()
+        `UPDATE subcategories SET status = 2, updated_at = NOW()
          WHERE category_id IN (SELECT id FROM categories WHERE module_id = $1) AND status != 2`,
         [id]
       );
       await db.query(
-        `UPDATE products SET status = 0, updated_at = NOW()
-         WHERE category_id IN (SELECT id FROM categories WHERE module_id = $1) AND status != 2`,
+        `UPDATE products SET status = 2, updated_at = NOW()
+         WHERE (module_id = $1 OR category_id IN (SELECT id FROM categories WHERE module_id = $1)) AND status != 2`,
         [id]
       );
     }
@@ -178,6 +186,22 @@ export const deleteModule = async (req, res) => {
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Module not found.' });
     }
+
+    // Cascade inactive status to child categories, subcategories, and products
+    await db.query(
+      `UPDATE categories SET status = 2, updated_at = NOW() WHERE module_id = $1 AND status != 2`,
+      [id]
+    );
+    await db.query(
+      `UPDATE subcategories SET status = 2, updated_at = NOW()
+       WHERE category_id IN (SELECT id FROM categories WHERE module_id = $1) AND status != 2`,
+      [id]
+    );
+    await db.query(
+      `UPDATE products SET status = 2, updated_at = NOW()
+       WHERE (module_id = $1 OR category_id IN (SELECT id FROM categories WHERE module_id = $1)) AND status != 2`,
+      [id]
+    );
 
     return res.json({
       success: true,
@@ -260,7 +284,10 @@ export const bulkImportModules = async (req, res) => {
           ? rawCode
           : await getNextModuleCode(client);
 
-        const statusInt = String(item.status || 'Active').toLowerCase() === 'active' ? 1 : 0;
+        const statusInt =
+          String(item.status || 'Active').toLowerCase() === 'active' || item.status === 1 || item.status === '1'
+            ? 1
+            : 2;
         const imageUrl = item.image && String(item.image).trim() ? String(item.image).trim() : null;
 
         const insertRes = await client.query(

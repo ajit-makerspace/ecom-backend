@@ -119,7 +119,7 @@ export const getMe = async (req, res) => {
   try {
     const userId = req.user.id;
     const { rows } = await db.query(
-      'SELECT id, email, plain_password, first_name, last_name, phone, user_type, status FROM admin_users WHERE id = $1',
+      'SELECT id, email, first_name, last_name, phone, user_type, status FROM admin_users WHERE id = $1',
       [userId]
     );
 
@@ -140,7 +140,6 @@ export const getMe = async (req, res) => {
         lastName: u.last_name || '',
         phone: u.phone || '',
         email: u.email,
-        password: u.plain_password || '',
         user_type: u.user_type,
         role: roleName,
         permissions,
@@ -160,7 +159,6 @@ export const getAdminUsers = async (req, res) => {
       SELECT 
         id,
         email,
-        plain_password AS "password",
         first_name AS "firstName",
         last_name AS "lastName",
         phone,
@@ -263,13 +261,12 @@ export const createAdminUser = async (req, res) => {
     const typeInt = parseInt(userType || 1, 10);
 
     const { rows } = await db.query(
-      `INSERT INTO admin_users (email, password_hash, plain_password, first_name, last_name, phone, user_type, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 1)
-       RETURNING id, email, plain_password AS "password", first_name AS "firstName", last_name AS "lastName", phone, user_type AS "userType", status, created_at AS "createdAt"`,
+      `INSERT INTO admin_users (email, password_hash, first_name, last_name, phone, user_type, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 1)
+       RETURNING id, email, first_name AS "firstName", last_name AS "lastName", phone, user_type AS "userType", status, created_at AS "createdAt"`,
       [
         cleanEmail,
         passwordHash,
-        plainPassword,
         firstName ? String(firstName).trim() : null,
         lastName ? String(lastName).trim() : null,
         phone ? String(phone).trim() : null,
@@ -290,7 +287,6 @@ export const createAdminUser = async (req, res) => {
         roleName,
         loginUrl,
       });
-      console.log(`[AdminAuth] Credentials email dispatched to ${cleanEmail}`);
     } catch (emailErr) {
       console.error(`[AdminAuth] Failed to dispatch credentials email to ${cleanEmail}:`, emailErr.message);
     }
@@ -431,8 +427,6 @@ export const updateAdminUser = async (req, res) => {
       const hash = await bcrypt.hash(cleanPwd, salt);
       updateFields.push(`password_hash = $${idx++}`);
       values.push(hash);
-      updateFields.push(`plain_password = $${idx++}`);
-      values.push(cleanPwd);
     }
 
     if (updateFields.length === 0) {
@@ -446,7 +440,7 @@ export const updateAdminUser = async (req, res) => {
       UPDATE admin_users
       SET ${updateFields.join(', ')}
       WHERE id = $${idx}
-      RETURNING id, email, plain_password AS "password", first_name AS "firstName", last_name AS "lastName", phone, user_type AS "userType", status, updated_at AS "updatedAt"
+      RETURNING id, email, first_name AS "firstName", last_name AS "lastName", phone, user_type AS "userType", status, updated_at AS "updatedAt"
     `;
 
     const { rows } = await db.query(query, values);
@@ -562,8 +556,6 @@ export const updateAdminProfile = async (req, res) => {
       const hash = await bcrypt.hash(cleanPwd, salt);
       updateFields.push(`password_hash = $${idx++}`);
       values.push(hash);
-      updateFields.push(`plain_password = $${idx++}`);
-      values.push(cleanPwd);
     }
 
     if (updateFields.length === 0) {
@@ -577,7 +569,7 @@ export const updateAdminProfile = async (req, res) => {
       UPDATE admin_users
       SET ${updateFields.join(', ')}
       WHERE id = $${idx}
-      RETURNING id, email, plain_password AS "password", first_name AS "firstName", last_name AS "lastName", phone, user_type AS "userType", status
+      RETURNING id, email, first_name AS "firstName", last_name AS "lastName", phone, user_type AS "userType", status
     `;
 
     const { rows } = await db.query(query, values);

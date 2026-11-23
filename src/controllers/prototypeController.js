@@ -4,50 +4,6 @@ import db from '../config/db.js';
 import { ensureLocalFolder, saveFile } from '../services/storageService.js';
 import multer from 'multer';
 
-// Ensure prototype_requests schema exists in PostgreSQL
-let tableEnsured = false;
-export async function ensurePrototypeRequestsTable() {
-  if (tableEnsured) return;
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS prototype_requests (
-        id SERIAL PRIMARY KEY,
-        request_number VARCHAR(60) UNIQUE NOT NULL,
-        user_id INTEGER,
-        customer_name VARCHAR(255),
-        customer_email VARCHAR(255),
-        customer_phone VARCHAR(50),
-        model_name VARCHAR(255) NOT NULL,
-        model_file_url TEXT NOT NULL,
-        model_file_size BIGINT DEFAULT 0,
-        support_files JSONB DEFAULT '[]'::jsonb,
-        material VARCHAR(100) DEFAULT 'PLA',
-        color VARCHAR(100) DEFAULT 'Original',
-        color_mode VARCHAR(50) DEFAULT 'original',
-        color_hex VARCHAR(50),
-        quality VARCHAR(50) DEFAULT 'Standard',
-        quantity INTEGER DEFAULT 1,
-        scale VARCHAR(50) DEFAULT '100',
-        units VARCHAR(50) DEFAULT 'mm',
-        instructions TEXT,
-        status VARCHAR(50) DEFAULT 'submitted',
-        quote_amount NUMERIC(12, 2) DEFAULT NULL,
-        quote_breakdown JSONB DEFAULT NULL,
-        admin_notes TEXT,
-        estimated_days INTEGER DEFAULT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_proto_requests_user ON prototype_requests(user_id);
-      CREATE INDEX IF NOT EXISTS idx_proto_requests_status ON prototype_requests(status);
-      CREATE INDEX IF NOT EXISTS idx_proto_requests_created ON prototype_requests(created_at DESC);
-    `);
-    tableEnsured = true;
-  } catch (err) {
-    console.warn('[Prototype Services] Table init notice:', err.message);
-  }
-}
-
 // Multer storage setup for 3D model files (up to 100MB)
 const storage = multer.memoryStorage();
 export const prototypeMulterUpload = multer({
@@ -63,8 +19,6 @@ export const prototypeMulterUpload = multer({
  */
 export const submitPrintRequest = async (req, res) => {
   try {
-    await ensurePrototypeRequestsTable();
-
     const files = req.files || {};
     const modelFile = files.model?.[0] || (req.file?.fieldname === 'model' ? req.file : null);
 
@@ -209,8 +163,6 @@ export const submitPrintRequest = async (req, res) => {
  */
 export const getMyPrintRequests = async (req, res) => {
   try {
-    await ensurePrototypeRequestsTable();
-
     const userId = req.user?.id;
     const userEmail = req.user?.email;
 
@@ -269,8 +221,6 @@ export const getMyPrintRequests = async (req, res) => {
  */
 export const getAdminPrototypeRequests = async (req, res) => {
   try {
-    await ensurePrototypeRequestsTable();
-
     const {
       search = '',
       status = 'all',
@@ -413,7 +363,6 @@ export const getAdminPrototypeRequests = async (req, res) => {
  */
 export const getAdminPrototypeRequestById = async (req, res) => {
   try {
-    await ensurePrototypeRequestsTable();
     const { id } = req.params;
 
     const { rows } = await db.query(
@@ -468,7 +417,6 @@ export const getAdminPrototypeRequestById = async (req, res) => {
  */
 export const updateAdminPrototypeRequestStatus = async (req, res) => {
   try {
-    await ensurePrototypeRequestsTable();
     const { id } = req.params;
     const { status, adminNotes } = req.body;
 
@@ -513,7 +461,6 @@ export const updateAdminPrototypeRequestStatus = async (req, res) => {
  */
 export const updateAdminPrototypeRequestQuote = async (req, res) => {
   try {
-    await ensurePrototypeRequestsTable();
     const { id } = req.params;
     const {
       amount,
@@ -578,7 +525,6 @@ export const updateAdminPrototypeRequestQuote = async (req, res) => {
  */
 export const deleteAdminPrototypeRequest = async (req, res) => {
   try {
-    await ensurePrototypeRequestsTable();
     const { id } = req.params;
 
     const { rows } = await db.query(
@@ -604,7 +550,6 @@ export const deleteAdminPrototypeRequest = async (req, res) => {
 };
 
 export default {
-  ensurePrototypeRequestsTable,
   prototypeMulterUpload,
   submitPrintRequest,
   getMyPrintRequests,
