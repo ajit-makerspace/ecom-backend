@@ -1,176 +1,274 @@
+import db from "../../config/db.js";
 
-import db from '../../config/db.js';
+/* =========================================================
+   CONSTANTS
+========================================================= */
 
-// Admin: Get all print requests
+const ORDER_STATUSES = [
+  "pending_payment",
+  "confirmed",
+  "in_production",
+  "quality_check",
+  "ready_to_ship",
+  "shipped",
+  "delivered",
+  "cancelled",
+];
+
+// Status changes an admin may make.
+// "confirmed" is intentionally missing as a target: it is set by the
+// payment verification flow, not manually.
+const ALLOWED_TRANSITIONS = {
+  pending_payment: ["cancelled"],
+  confirmed: ["in_production", "cancelled"],
+  in_production: ["quality_check", "cancelled"],
+  quality_check: ["in_production", "ready_to_ship", "cancelled"],
+  ready_to_ship: ["shipped", "cancelled"],
+  shipped: ["delivered"],
+  delivered: [],
+  cancelled: [],
+};
+
+const SORT_COLUMNS = {
+  id: "pr.id",
+  order_number: "pr.order_number",
+  created_at: "pr.created_at",
+  updated_at: "pr.updated_at",
+  quantity: "pr.quantity",
+  total_amount: "pr.total_amount",
+  order_status: "pr.order_status",
+};
+
+const MAX_PAGE_SIZE = 100;
+const MAX_SEARCH_LENGTH = 100;
+const MAX_INT4 = 2147483647;
+
+const fail = (res, code, message) =>
+  res.status(code).json({ success: false, message });
+
+// Parses a positive int4 ID. Returns null when invalid.
+const parseId = (value) => {
+  if (!/^[1-9]\d{0,9}$/.test(String(value))) return null;
+  const n = Number(value);
+  return n <= MAX_INT4 ? n : null;
+};
+
+// Escapes LIKE wildcards so user input is matched literally.
+const escapeLike = (text) => text.replace(/[\\%_]/g, "\\$&");
+
+// Trims a string; returns null for empty / non-string values.
+const cleanText = (value) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+};
+
+/* =========================================================
+   ADMIN: GET ALL PRINT ORDERS
+   GET /print-requests
+========================================================= */
+
 export const getAdminPrintRequests = async (req, res) => {
   try {
     const {
-      search = '',
-      status = 'all',
-      material = 'all',
-      page = 1,
-      limit = 20,
-      sortBy = 'created_at',
-      sortOrder = 'DESC',
+      search = "",
+      status = "all",
+      material = "all",
+      page = "1",
+      limit = "20",
+      sortBy = "created_at",
+      sortOrder = "DESC",
     } = req.query;
 
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const pageSize = Math.min(
-      100,
-      Math.max(1, parseInt(limit, 10) || 20)
-    );
+    // ---- Pagination ----
+    const pageNum = Number.parseInt(page, 10);
+    const pageSize = Number.parseInt(limit, 10);
 
+    if (!Number.isInteger(pageNum) || pageNum < 1) {
+      return fail(res, 400, "Page must be a positive integer.");
+    }
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
+      return fail(res, 400, `Limit must be between 1 and ${MAX_PAGE_SIZE}.`);
+    }
     const offset = (pageNum - 1) * pageSize;
 
+    // ---- Sorting ----
+    const sortColumn = SORT_COLUMNS[String(sortBy)];
+    if (!sortColumn) {
+      return fail(
+        res,
+        400,
+        `Invalid sort field. Use one of: ${Object.keys(SORT_COLUMNS).join(", ")}.`
+      );
+    }
+
+    const sortDirection = String(sortOrder).toUpperCase();
+    if (!["ASC", "DESC"].includes(sortDirection)) {
+      return fail(res, 400, "Sort order must be ASC or DESC.");
+    }
+
+    // ---- Filters ----
     const conditions = [];
     const values = [];
-    let idx = 1;
 
-    // Search
-    if (search.trim()) {
+    const searchTerm = String(search).trim();
+    if (searchTerm.length > MAX_SEARCH_LENGTH) {
+      return fail(res, 400, `Search must be at most ${MAX_SEARCH_LENGTH} characters.`);
+    }
+
+    if (searchTerm) {
+      values.push(`%${escapeLike(searchTerm)}%`);
+      const p = `$${values.length}`;
       conditions.push(`(
-        pr.id::text ILIKE $${idx}
-        OR COALESCE(pr.material, '') ILIKE $${idx}
+        pr.order_number ILIKE ${p}
+        OR pr.id::text ILIKE ${p}
+        OR pm.name ILIKE ${p}
+        OR u.email ILIKE ${p}
+        OR u.phone ILIKE ${p}
+        OR CONCAT_WS(' ', u.first_name, u.last_name) ILIKE ${p}
       )`);
-
-      values.push(`%${search.trim()}%`);
-      idx++;
     }
 
-    // Status filter
-    if (status !== 'all') {
-      conditions.push(`pr.status = $${idx}`);
-      values.push(status);
-      idx++;
+    if (String(status) !== "all") {
+      if (!ORDER_STATUSES.includes(String(status))) {
+        return fail(res, 400, "Invalid order status.");
+      }
+      values.push(String(status));
+      conditions.push(`pr.order_status = $${values.length}`);
     }
 
-    // Material filter
-    if (material !== 'all') {
-      conditions.push(`LOWER(pr.material) = LOWER($${idx})`);
-      values.push(material);
-      idx++;
+    if (String(material) !== "all") {
+      const materialId = parseId(material);
+      if (!materialId) return fail(res, 400, "Invalid material ID.");
+      values.push(materialId);
+      conditions.push(`pr.material_id = $${values.length}`);
     }
 
-    const whereSQL = conditions.length
-      ? `WHERE ${conditions.join(' AND ')}`
-      : '';
+    const whereSQL = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    // Prevent SQL injection through sorting
-    const allowedSortColumns = [
-      'created_at',
-      'updated_at',
-      'id',
-      'quantity',
-      'status',
-      'material',
-    ];
+    const fromSQL = `
+      FROM print_requests pr
+      INNER JOIN print_materials pm ON pm.id = pr.material_id
+      LEFT JOIN users u ON u.id = pr.user_id
+    `;
 
-    const safeSortBy = allowedSortColumns.includes(sortBy)
-      ? sortBy
-      : 'created_at';
+    // ---- Queries ----
+    const [countResult, metricsResult, result] = await Promise.all([
+      db.query(`SELECT COUNT(*)::int AS total ${fromSQL} ${whereSQL}`, values),
 
-    const safeSortOrder =
-      sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      db.query(`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE order_status = 'pending_payment')::int AS pending_payment,
+          COUNT(*) FILTER (WHERE order_status = 'confirmed')::int AS confirmed,
+          COUNT(*) FILTER (WHERE order_status = 'in_production')::int AS in_production,
+          COUNT(*) FILTER (WHERE order_status = 'quality_check')::int AS quality_check,
+          COUNT(*) FILTER (WHERE order_status = 'ready_to_ship')::int AS ready_to_ship,
+          COUNT(*) FILTER (WHERE order_status = 'shipped')::int AS shipped,
+          COUNT(*) FILTER (WHERE order_status = 'delivered')::int AS delivered,
+          COUNT(*) FILTER (WHERE order_status = 'cancelled')::int AS cancelled
+        FROM print_requests
+      `),
 
-    // Total matching requests
-    const countResult = await db.query(
-      `SELECT COUNT(*)::int AS total
-       FROM print_requests pr
-       ${whereSQL}`,
-      values
-    );
+      db.query(
+        `
+        SELECT
+          pr.id,
+          pr.order_number AS "orderNumber",
+
+          pr.user_id AS "userId",
+          json_build_object(
+            'firstName', u.first_name,
+            'lastName', u.last_name,
+            'email', u.email,
+            'phone', u.phone
+          ) AS customer,
+          pr.user_address_id AS "addressId",
+
+          pr.material_id AS "materialId",
+          pm.name AS "materialName",
+
+          pr.color_mode AS "colorMode",
+          pr.color_hex AS "colorHex",
+          pr.quality,
+          pr.quantity,
+          pr.units,
+          pr.scale,
+
+          pr.x_dimension AS "xDimension",
+          pr.y_dimension AS "yDimension",
+          pr.z_dimension AS "zDimension",
+          pr.original_volume_cm3 AS "originalVolumeCm3",
+          pr.scaled_volume_cm3 AS "scaledVolumeCm3",
+          pr.wall_thickness AS "wallThickness",
+          pr.infill,
+          pr.instructions,
+
+          pr.material_cost AS "materialCost",
+          pr.additional_charges AS "additionalCharges",
+          pr.subtotal,
+          pr.tax_amount AS "taxAmount",
+          pr.shipping_cost AS "shippingCost",
+          pr.total_amount AS "totalAmount",
+
+          pr.order_status AS "orderStatus",
+          pr.tracking_number AS "trackingNumber",
+          pr.courier_name AS "courierName",
+          pr.cancelled_at AS "cancelledAt",
+          pr.created_at AS "createdAt",
+          pr.updated_at AS "updatedAt",
+
+          payment.status AS "paymentStatus",
+          payment.payment_method AS "paymentMethod",
+
+          COALESCE(
+            (
+              SELECT json_agg(
+                json_build_object(
+                  'id', mf.id,
+                  'filename', mf.original_name,
+                  'mimeType', mf.mime_type,
+                  'fileSize', mf.file_size,
+                  'role', prf.file_role,
+                  'url', '/api/media/' || mf.id
+                )
+                ORDER BY
+                  CASE WHEN prf.file_role = 'model' THEN 0 ELSE 1 END,
+                  prf.id
+              )
+              FROM print_request_files prf
+              INNER JOIN media_files mf ON mf.id = prf.media_id
+              WHERE prf.print_request_id = pr.id
+            ),
+            '[]'::json
+          ) AS files
+
+        ${fromSQL}
+
+        LEFT JOIN LATERAL (
+          SELECT p.status, p.payment_method
+          FROM print_request_payments p
+          WHERE p.print_request_id = pr.id
+          ORDER BY p.created_at DESC, p.id DESC
+          LIMIT 1
+        ) payment ON TRUE
+
+        ${whereSQL}
+
+        ORDER BY ${sortColumn} ${sortDirection}, pr.id DESC
+        LIMIT $${values.length + 1}
+        OFFSET $${values.length + 2}
+        `,
+        [...values, pageSize, offset]
+      ),
+    ]);
 
     const total = countResult.rows[0].total;
 
-    // Status metrics
-    const metricsResult = await db.query(`
-      SELECT
-        COUNT(*)::int AS total,
-        COUNT(*) FILTER (
-          WHERE status = 'pending_review'
-        )::int AS pending_review,
-        COUNT(*) FILTER (
-          WHERE status = 'under_review'
-        )::int AS under_review,
-        COUNT(*) FILTER (
-          WHERE status = 'quoted'
-        )::int AS quoted,
-        COUNT(*) FILTER (
-          WHERE status = 'accepted'
-        )::int AS accepted,
-        COUNT(*) FILTER (
-          WHERE status = 'in_production'
-        )::int AS in_production,
-        COUNT(*) FILTER (
-          WHERE status = 'completed'
-        )::int AS completed,
-        COUNT(*) FILTER (
-          WHERE status = 'rejected'
-        )::int AS rejected
-      FROM print_requests
-    `);
-
-    // Fetch requests
-    const { rows } = await db.query(
-      `SELECT
-        pr.id,
-        pr.user_id AS "userId",
-        pr.media_id AS "mediaId",
-        pr.user_address_id AS "addressId",
-        pr.material,
-        pr.color_mode AS "colorMode",
-        pr.color_hex AS "colorHex",
-        pr.quality,
-        pr.quantity,
-        pr.scale,
-        pr.units,
-        pr.instructions,
-        pr.status,
-        pr.created_at AS "createdAt",
-        pr.updated_at AS "updatedAt",
-
-        json_build_object(
-          'id', mf.id,
-          'filename', mf.original_name,
-          'mimeType', mf.mime_type,
-          'fileSize', mf.file_size
-        ) AS "model",
-
-        COALESCE(
-          (
-            SELECT json_agg(
-              json_build_object(
-                'mediaId', sm.id,
-                'filename', sm.original_name,
-                'mimeType', sm.mime_type,
-                'fileSize', sm.file_size
-              )
-            )
-            FROM print_request_files prf
-            JOIN media_files sm
-              ON sm.id = prf.media_id
-            WHERE prf.print_request_id = pr.id
-              AND prf.file_role = 'support'
-          ),
-          '[]'::json
-        ) AS "supportFiles"
-
-      FROM print_requests pr
-      LEFT JOIN media_files mf
-        ON mf.id = pr.media_id
-
-      ${whereSQL}
-
-      ORDER BY pr.${safeSortBy} ${safeSortOrder}
-      LIMIT $${idx}
-      OFFSET $${idx + 1}`,
-      [...values, pageSize, offset]
-    );
-
     return res.status(200).json({
       success: true,
-      message: 'Print requests fetched successfully.',
-      data: rows,
+      message: "Print orders fetched successfully.",
+      data: result.rows,
       metrics: metricsResult.rows[0],
       pagination: {
         total,
@@ -179,448 +277,29 @@ export const getAdminPrintRequests = async (req, res) => {
         totalPages: Math.ceil(total / pageSize),
       },
     });
-
-  } catch (err) {
-    console.error('Get Admin Print Requests Error:', err);
-
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch print requests.',
-    });
-  }
-};
-
-
-
-
-export const updateAdminPrintRequestQuotation = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const {
-      amount,
-      breakdown = {},
-      estimatedDays,
-      adminNotes,
-      status,
-    } = req.body ?? {};
-
-    // 1. Validate request ID
-    if (!id || !/^[1-9]\d*$/.test(id)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid print request ID.',
-      });
-    }
-
-    // 2. Validate quotation amount
-    if (
-      amount === undefined ||
-      amount === null ||
-      typeof amount === 'boolean' ||
-      (typeof amount === 'string' && amount.trim() === '')
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: 'Quotation amount is required.',
-      });
-    }
-
-    const quotationAmount = Number(amount);
-
-    const isValidMoney = (value) =>
-      Number.isFinite(value) &&
-      value >= 0 &&
-      Math.round(value * 100) === value * 100;
-
-    if (!isValidMoney(quotationAmount) || quotationAmount <= 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'Quotation amount must be positive and have no more than two decimal places.',
-      });
-    }
-
-    // 3. Validate breakdown
-    if (
-      !breakdown ||
-      typeof breakdown !== 'object' ||
-      Array.isArray(breakdown)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: 'Quotation breakdown must be a valid object.',
-      });
-    }
-
-    const parseCost = (value, fieldName) => {
-      if (
-        typeof value === 'boolean' ||
-        value === null ||
-        (typeof value === 'string' && value.trim() === '')
-      ) {
-        throw new Error(
-          `${fieldName} must be a valid non-negative amount.`
-        );
-      }
-
-      const parsed = Number(value);
-
-      if (!isValidMoney(parsed)) {
-        throw new Error(
-          `${fieldName} must be non-negative and have no more than two decimal places.`
-        );
-      }
-
-      return parsed;
-    };
-
-    let materialCost;
-    let printingCost;
-    let shippingCost;
-
-    try {
-      materialCost = parseCost(
-        breakdown.materialCost ?? 0,
-        'Material cost'
-      );
-
-      printingCost = parseCost(
-        breakdown.printingCost ?? 0,
-        'Printing cost'
-      );
-
-      shippingCost = parseCost(
-        breakdown.shippingCost ?? 0,
-        'Shipping cost'
-      );
-    } catch (validationError) {
-      return res.status(400).json({
-        success: false,
-        message: validationError.message,
-      });
-    }
-
-    // 4. Validate estimated days
-    const requestedDays =
-      estimatedDays ?? breakdown.estimatedDays ?? 3;
-
-    if (
-      typeof requestedDays === 'boolean' ||
-      (typeof requestedDays === 'string' &&
-        requestedDays.trim() === '')
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'Estimated delivery days must be an integer between 1 and 60.',
-      });
-    }
-
-    const days = Number(requestedDays);
-
-    if (!Number.isInteger(days) || days < 1 || days > 60) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'Estimated delivery days must be between 1 and 60.',
-      });
-    }
-
-    // 5. Validate admin notes
-    const notes = adminNotes ?? breakdown.adminNotes ?? '';
-
-    if (typeof notes !== 'string') {
-      return res.status(400).json({
-        success: false,
-        message: 'Admin notes must be a string.',
-      });
-    }
-
-    if (notes.length > 2000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Admin notes cannot exceed 2000 characters.',
-      });
-    }
-
-    // 6. Validate quotation status
-    if (status !== 'quoted') {
-      return res.status(400).json({
-        success: false,
-        message:
-          'Status must be "quoted" when submitting a quotation.',
-      });
-    }
-
-    // // 7. Save quotation and update request using db.query()
-    // const result = await db.query(
-    //   `
-    //   WITH locked_request AS (
-    //     SELECT id
-    //     FROM print_requests
-    //     WHERE id = $1
-    //     FOR UPDATE
-    //   ),
-    //   next_version AS (
-    //     SELECT COALESCE(MAX(q.version_number), 0) + 1 AS version_number
-    //     FROM print_request_quotations q
-    //     INNER JOIN locked_request lr
-    //       ON lr.id = q.print_request_id
-    //   ),
-    //   deactivate_previous AS (
-    //     UPDATE print_request_quotations
-    //     SET is_current = FALSE
-    //     WHERE print_request_id = $1
-    //       AND is_current = TRUE
-    //       AND EXISTS (SELECT 1 FROM locked_request)
-    //     RETURNING id
-    //   ),
-    //   insert_quotation AS (
-    //     INSERT INTO print_request_quotations (
-    //       print_request_id,
-    //       version_number,
-    //       amount,
-    //       material_cost,
-    //       printing_cost,
-    //       shipping_cost,
-    //       estimated_days,
-    //       admin_notes,
-    //       created_by_admin_id,
-    //       is_current
-    //     )
-    //     SELECT
-    //       lr.id,
-    //       nv.version_number,
-    //       $2,
-    //       $3,
-    //       $4,
-    //       $5,
-    //       $6,
-    //       $7,
-    //       $8,
-    //       TRUE
-    //     FROM locked_request lr
-    //     CROSS JOIN next_version nv
-    //     RETURNING
-    //       id,
-    //       print_request_id AS "printRequestId",
-    //       version_number AS "versionNumber",
-    //       amount,
-    //       material_cost AS "materialCost",
-    //       printing_cost AS "printingCost",
-    //       shipping_cost AS "shippingCost",
-    //       estimated_days AS "estimatedDays",
-    //       admin_notes AS "adminNotes",
-    //       created_at AS "createdAt",
-    //       is_current AS "isCurrent"
-    //   ),
-    //   update_request AS (
-    //     UPDATE print_requests
-    //     SET
-    //       status = 'quoted',
-    //       updated_at = NOW()
-    //     WHERE id = $1
-    //       AND EXISTS (SELECT 1 FROM insert_quotation)
-    //     RETURNING id
-    //   )
-    //   SELECT
-    //     iq.*,
-    //     'quoted' AS status
-    //   FROM insert_quotation iq
-    //   INNER JOIN update_request ur
-    //     ON ur.id = iq."printRequestId"
-    //   `,
-    //   [
-    //     id,
-    //     quotationAmount,
-    //     materialCost,
-    //     printingCost,
-    //     shippingCost,
-    //     days,
-    //     notes.trim(),
-    //     req.user?.adminId ?? null,
-    //   ]
-    // );
-
-    // // 8. Check whether request exists
-    // if (result.rowCount === 0) {
-    //   return res.status(404).json({
-    //     success: false,
-    //     message: `Print request ${id} was not found.`,
-    //   });
-    // }
-
-    // // 9. Success response
-    // return res.status(200).json({
-    //   success: true,
-    //   message: 'Quotation saved successfully.',
-    //   data: result.rows[0],
-    // });
-    // 7. Save quotation using a transaction
-const client = await db.pool.connect();
-
-try {
-  await client.query('BEGIN');
-
-  // Lock the print request
-  const requestResult = await client.query(
-    `SELECT id, status
-     FROM print_requests
-     WHERE id = $1
-     FOR UPDATE`,
-    [id]
-  );
-
-  if (requestResult.rowCount === 0) {
-    await client.query('ROLLBACK');
-
-    return res.status(404).json({
-      success: false,
-      message: `Print request ${id} was not found.`,
-    });
-  }
-
-  const currentStatus = requestResult.rows[0].status;
-  // Do not allow quotation changes after acceptance or rejection  
-  const allowedStatuses = [
-    'pending_review',
-    'under_review',
-    'quoted',
-  ];
-
-  if (!allowedStatuses.includes(currentStatus)) {
-    await client.query('ROLLBACK');
-
-    return res.status(409).json({
-      success: false,
-      message: `A quotation cannot be updated when the request status is "${currentStatus}".`,
-    });
-  }
-
-  // Generate the next quotation version
-  const versionResult = await client.query(
-    `SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
-     FROM print_request_quotations
-     WHERE print_request_id = $1`,
-    [id]
-  );
-
-  const nextVersion = versionResult.rows[0].next_version;
-
-  // Mark previous quotation as no longer current
-  await client.query(
-    `UPDATE print_request_quotations
-     SET is_current = FALSE
-     WHERE print_request_id = $1
-       AND is_current = TRUE`,
-    [id]
-  );
-
-  // Insert the new quotation
-  const quotationResult = await client.query(
-    `INSERT INTO print_request_quotations (
-       print_request_id,
-       version_number,
-       amount,
-       material_cost,
-       printing_cost,
-       shipping_cost,
-       estimated_days,
-       admin_notes,
-       created_by_admin_id,
-       is_current
-     )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)
-     RETURNING
-       id,
-       print_request_id AS "printRequestId",
-       version_number AS "versionNumber",
-       amount,
-       material_cost AS "materialCost",
-       printing_cost AS "printingCost",
-       shipping_cost AS "shippingCost",
-       estimated_days AS "estimatedDays",
-       admin_notes AS "adminNotes",
-       created_at AS "createdAt",
-       is_current AS "isCurrent"`,
-    [
-      id,
-      nextVersion,
-      quotationAmount,
-      materialCost,
-      printingCost,
-      shippingCost,
-      days,
-      notes.trim(),
-      req.user?.adminId ?? null,
-    ]
-  );
-
-  // Update request status
-  await client.query(
-    `UPDATE print_requests
-     SET status = 'quoted',
-         updated_at = NOW()
-     WHERE id = $1`,
-    [id]
-  );
-
-  await client.query('COMMIT');
-
-  return res.status(200).json({
-    success: true,
-    message: 'Quotation saved successfully.',
-    data: {
-      ...quotationResult.rows[0],
-      status: 'quoted',
-    },
-  });
-
-} catch (error) {
-  await client.query('ROLLBACK');
-  throw error;
-} finally {
-  client.release();
-}
-
   } catch (error) {
-    console.error(
-      'Update Print Request Quotation Error:',
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to save quotation. Please try again.',
-    });
+    console.error("Get Admin Print Orders Error:", error);
+    return fail(res, 500, "Failed to fetch print orders.");
   }
 };
 
-/**
- * Get Single Print Request by ID for Admin
- */
+/* =========================================================
+   ADMIN: GET SINGLE PRINT ORDER
+   GET /print-requests/:id
+========================================================= */
+
 export const getAdminPrintRequestById = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!id || !/^\d+$/.test(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid print request ID.' });
-    }
+    const id = parseId(req.params.id);
+    if (!id) return fail(res, 400, "Invalid print order ID.");
 
-    const { rows } = await db.query(
-      `SELECT
+    const orderResult = await db.query(
+      `
+      SELECT
         pr.id,
-        pr.status,
-        pr.material,
-        pr.color_mode AS "colorMode",
-        pr.color_hex AS "colorHex",
-        pr.quality,
-        pr.quantity,
-        pr.scale,
-        pr.units,
-        pr.instructions,
-        pr.created_at AS "createdAt",
-        pr.updated_at AS "updatedAt",
+        pr.order_number AS "orderNumber",
+
+        pr.user_id AS "userId",
         json_build_object(
           'id', u.id,
           'firstName', u.first_name,
@@ -628,125 +307,246 @@ export const getAdminPrintRequestById = async (req, res) => {
           'email', u.email,
           'phone', u.phone
         ) AS customer,
-        json_build_object(
-          'id', mf.id,
-          'filename', mf.filename,
-          'originalName', mf.original_name,
-          'size', mf.file_size,
-          'mimeType', mf.mime_type,
-          'url', CASE WHEN mf.storage_path LIKE '/%' THEN mf.storage_path ELSE '/uploads/' || mf.storage_path END
-        ) AS file,
-        json_build_object(
-          'id', ua.id,
-          'firstName', ua.first_name,
-          'lastName', ua.last_name,
-          'phone', ua.phone,
-          'addressLine1', ua.address_line_1,
-          'addressLine2', ua.address_line_2,
-          'city', ua.city,
-          'state', ua.state,
-          'postalCode', ua.postal_code,
-          'country', ua.country
-        ) AS address,
-        (
-          SELECT json_build_object(
-            'id', q.id,
-            'versionNumber', q.version_number,
-            'amount', q.amount,
-            'materialCost', q.material_cost,
-            'printingCost', q.printing_cost,
-            'shippingCost', q.shipping_cost,
-            'estimatedDays', q.estimated_days,
-            'adminNotes', q.admin_notes,
-            'createdAt', q.created_at
-          )
-          FROM print_request_quotations q
-          WHERE q.print_request_id = pr.id AND q.is_current = TRUE
-          LIMIT 1
-        ) AS quotation
+
+        pr.user_address_id AS "addressId",
+        to_jsonb(ua) AS address,
+
+        pr.material_id AS "materialId",
+        pm.name AS "materialName",
+        pm.description AS "materialDescription",
+        pm.price_per_cm3 AS "pricePerCm3",
+
+        pr.color_mode AS "colorMode",
+        pr.color_hex AS "colorHex",
+        pr.quality,
+        pr.quantity,
+        pr.units,
+        pr.scale,
+
+        pr.x_dimension AS "xDimension",
+        pr.y_dimension AS "yDimension",
+        pr.z_dimension AS "zDimension",
+        pr.original_volume_cm3 AS "originalVolumeCm3",
+        pr.scaled_volume_cm3 AS "scaledVolumeCm3",
+        pr.wall_thickness AS "wallThickness",
+        pr.infill,
+        pr.instructions,
+
+        pr.material_cost AS "materialCost",
+        pr.additional_charges AS "additionalCharges",
+        pr.subtotal,
+        pr.tax_amount AS "taxAmount",
+        pr.shipping_cost AS "shippingCost",
+        pr.total_amount AS "totalAmount",
+        pr.pricing_snapshot AS "pricingSnapshot",
+
+        pr.order_status AS "orderStatus",
+        pr.tracking_number AS "trackingNumber",
+        pr.courier_name AS "courierName",
+        pr.cancelled_at AS "cancelledAt",
+        pr.created_at AS "createdAt",
+        pr.updated_at AS "updatedAt"
+
       FROM print_requests pr
+      INNER JOIN print_materials pm ON pm.id = pr.material_id
       LEFT JOIN users u ON u.id = pr.user_id
-      LEFT JOIN media_files mf ON mf.id = pr.media_id
       LEFT JOIN user_addresses ua ON ua.id = pr.user_address_id
-      WHERE pr.id = $1`,
+      WHERE pr.id = $1
+      LIMIT 1
+      `,
       [id]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Print request not found.' });
+    if (orderResult.rowCount === 0) {
+      return fail(res, 404, "Print order not found.");
     }
 
-    return res.json({ success: true, data: rows[0] });
-  } catch (err) {
-    console.error('Get Admin Print Request By ID Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch print request details.' });
-  }
-};
+    const [filesResult, paymentsResult] = await Promise.all([
+      db.query(
+        `
+        SELECT
+          mf.id,
+          mf.original_name AS "filename",
+          mf.filename AS "storedFilename",
+          mf.mime_type AS "mimeType",
+          mf.file_size AS "fileSize",
+          mf.folder,
+          mf.storage_type AS "storageType",
+          mf.storage_path AS "storagePath",
+          '/api/media/' || mf.id AS url,
+          prf.file_role AS "fileRole",
+          prf.created_at AS "createdAt"
+        FROM print_request_files prf
+        INNER JOIN media_files mf ON mf.id = prf.media_id
+        WHERE prf.print_request_id = $1
+        ORDER BY
+          CASE WHEN prf.file_role = 'model' THEN 0 ELSE 1 END,
+          prf.id ASC
+        `,
+        [id]
+      ),
 
-/**
- * Update Print Request Status for Admin
- */
-export const updateAdminPrintRequestStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
+      db.query(
+        `
+        SELECT
+          p.id,
+          p.razorpay_order_id AS "razorpayOrderId",
+          p.razorpay_payment_id AS "razorpayPaymentId",
+          p.amount,
+          p.currency,
+          p.status,
+          p.payment_method AS "paymentMethod",
+          p.failure_reason AS "failureReason",
+          p.created_at AS "createdAt"
+        FROM print_request_payments p
+        WHERE p.print_request_id = $1
+        ORDER BY p.created_at DESC, p.id DESC
+        `,
+        [id]
+      ),
+    ]);
 
-    if (!id || !/^\d+$/.test(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid print request ID.' });
-    }
+    const files = filesResult.rows;
 
-    if (!status) {
-      return res.status(400).json({ success: false, message: 'Status is required.' });
-    }
-
-    const { rows } = await db.query(
-      `UPDATE print_requests
-       SET status = $1, updated_at = NOW()
-       WHERE id = $2
-       RETURNING id, status, updated_at AS "updatedAt"`,
-      [status, id]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Print request not found.' });
-    }
-
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: `Print request status updated to ${status}.`,
-      data: rows[0],
+      message: "Print order details fetched successfully.",
+      data: {
+        ...orderResult.rows[0],
+        model: files.find((f) => f.fileRole === "model") || null,
+        supportFiles: files.filter((f) => f.fileRole === "support"),
+        payments: paymentsResult.rows,
+        allowedNextStatuses:
+          ALLOWED_TRANSITIONS[orderResult.rows[0].orderStatus] || [],
+      },
     });
-  } catch (err) {
-    console.error('Update Print Request Status Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to update print request status.' });
+  } catch (error) {
+    console.error("Get Admin Print Order Details Error:", error);
+    return fail(res, 500, "Failed to fetch print order details.");
   }
 };
 
-/**
- * Delete Print Request for Admin
- */
-export const deleteAdminPrintRequest = async (req, res) => {
+/* =========================================================
+   ADMIN: UPDATE ORDER STATUS
+   PATCH /print-requests/:id/status
+   body: { status, trackingNumber?, courierName? }
+========================================================= */
+
+export const updatePrintRequestStatus = async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return fail(res, 400, "Invalid print order ID.");
+
+  const { status, trackingNumber, courierName } = req.body ?? {};
+
+  if (typeof status !== "string" || !ORDER_STATUSES.includes(status)) {
+    return fail(res, 400, "Invalid order status.");
+  }
+
+  const tracking = cleanText(trackingNumber);
+  const courier = cleanText(courierName);
+
+  if (tracking && tracking.length > 150) {
+    return fail(res, 400, "Tracking number must be at most 150 characters.");
+  }
+  if (courier && courier.length > 150) {
+    return fail(res, 400, "Courier name must be at most 150 characters.");
+  }
+
+  const client = await db.pool.connect();
+
   try {
-    const { id } = req.params;
+    await client.query("BEGIN");
 
-    if (!id || !/^\d+$/.test(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid print request ID.' });
-    }
-
-    const { rowCount } = await db.query(
-      'DELETE FROM print_requests WHERE id = $1',
+    // Lock the row so two admins can't change the same order at once.
+    const current = await client.query(
+      `SELECT id, order_status, tracking_number, courier_name
+       FROM print_requests
+       WHERE id = $1
+       FOR UPDATE`,
       [id]
     );
 
-    if (rowCount === 0) {
-      return res.status(404).json({ success: false, message: 'Print request not found.' });
+    if (current.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "Print order not found.");
     }
 
-    return res.json({ success: true, message: 'Print request deleted successfully.' });
-  } catch (err) {
-    console.error('Delete Print Request Error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to delete print request.' });
+    const order = current.rows[0];
+    const from = order.order_status;
+
+    // Allow re-saving a shipped order only to correct courier / tracking.
+    const isShippingCorrection = from === "shipped" && status === "shipped";
+
+    if (!isShippingCorrection) {
+      if (from === status) {
+        await client.query("ROLLBACK");
+        return fail(res, 400, `Order is already ${status.replace(/_/g, " ")}.`);
+      }
+
+      const allowed = ALLOWED_TRANSITIONS[from] || [];
+      if (!allowed.includes(status)) {
+        await client.query("ROLLBACK");
+        return fail(
+          res,
+          400,
+          allowed.length
+            ? `Cannot change status from "${from}" to "${status}". Allowed: ${allowed.join(", ")}.`
+            : `Order is ${from.replace(/_/g, " ")} and can no longer be changed.`
+        );
+      }
+    }
+
+    // Shipping details are mandatory for "shipped".
+    if (status === "shipped") {
+      const finalTracking = tracking ?? order.tracking_number;
+      const finalCourier = courier ?? order.courier_name;
+
+      if (!finalTracking || !finalCourier) {
+        await client.query("ROLLBACK");
+        return fail(
+          res,
+          400,
+          "Courier name and tracking number are required to mark an order as shipped."
+        );
+      }
+    }
+
+    const { rows } = await client.query(
+      `
+      UPDATE print_requests
+      SET order_status = $2,
+          tracking_number = COALESCE($3, tracking_number),
+          courier_name = COALESCE($4, courier_name),
+          cancelled_at = CASE WHEN $5::boolean THEN NOW() ELSE cancelled_at END,
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        order_number AS "orderNumber",
+        order_status AS "orderStatus",
+        tracking_number AS "trackingNumber",
+        courier_name AS "courierName",
+        cancelled_at AS "cancelledAt",
+        updated_at AS "updatedAt"
+      `,
+      [id, status, tracking, courier, status === "cancelled"]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: `Order status updated to ${status.replace(/_/g, " ")}.`,
+      data: {
+        ...rows[0],
+        allowedNextStatuses: ALLOWED_TRANSITIONS[status] || [],
+      },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Update Print Order Status Error:", error);
+    return fail(res, 500, "Failed to update order status.");
+  } finally {
+    client.release();
   }
 };
-
-

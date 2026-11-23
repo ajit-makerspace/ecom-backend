@@ -26,7 +26,8 @@ import warehouseRoutes from './routes/admin/warehouseRoutes.js';
 import blogsRoutes from './routes/admin/blogsRoutes.js';
 import adminPrototypeRoutes from './routes/admin/adminPrototypeRoutes.js';
 import adminPrintRequestRoutes from './routes/admin/adminPrintRequestRoutes.js';
-
+import adminPrintMaterialRoutes from './routes/admin/printMaterialRoutes.js'
+import userMaterialRoute from "./routes/user/userMaterialRoute.js";
 
 import userAuthRoutes from './routes/user/userAuthRoutes.js';
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -419,7 +420,9 @@ app.use(
 app.use('/api/admin/auth', authLimiter, authRoutes);
 
 app.use('/api/admin', adminPrintRequestRoutes);
-app.use('/api/admin', adminPrototypeRoutes);
+app.use('/api/admin', adminPrintMaterialRoutes);
+
+// app.use('/api/admin', adminPrototypeRoutes);
 app.use('/api/admin', moduleRoutes);
 app.use('/api/admin', categoryRoutes);
 app.use('/api/admin', productRoutes);
@@ -453,6 +456,8 @@ app.use('/api/user', userCompetitionRoute);
 app.use('/api/user', userPrintRequestRoutes);
 app.use('/api/user', userBlogsRoute);
 app.use('/api/user', printRequestPaymentRoutes);
+app.use('/api/user', userMaterialRoute);
+
 
 
 // Universal Refresh & Logout API Endpoints
