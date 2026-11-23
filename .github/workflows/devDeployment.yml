@@ -4,7 +4,6 @@ name: Deploy E-commerce Backend
 on:
   push:
     branches:
-      - main
       - development
   workflow_dispatch:
     inputs:
