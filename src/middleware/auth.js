@@ -38,13 +38,19 @@ export async function authenticateToken(req, res, next) {
         [adminUser.email]
       );
       if (userRows.length === 0) {
-        const insertUser = await db.query(
-          `INSERT INTO users (email, password_hash, first_name, last_name, phone, status, role, created_at, updated_at)
-           VALUES ($1, 'LINKED_ADMIN', $2, $3, $4, 1, 1, NOW(), NOW())
-           RETURNING id, email, first_name, last_name, phone, role, status`,
-          [adminUser.email, adminUser.first_name || 'Admin', adminUser.last_name || 'User', '']
-        );
-        userRows = insertUser.rows;
+        try {
+          const insertUser = await db.query(
+            `INSERT INTO users (id, email, password_hash, first_name, last_name, phone, status, role, created_at, updated_at)
+             VALUES ($1, $2, 'LINKED_ADMIN', $3, $4, $5, 1, 1, NOW(), NOW())
+             RETURNING id, email, first_name, last_name, phone, role, status`,
+            [adminUser.id, adminUser.email, adminUser.first_name || 'Admin', adminUser.last_name || 'User', '']
+          );
+          userRows = insertUser.rows;
+        } catch (_) {
+          // If insert with adminUser.id conflicted, fetch existing by email
+          const retryUser = await db.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [adminUser.email]);
+          userRows = retryUser.rows;
+        }
       }
       if (userRows.length > 0) {
         customerId = userRows[0].id;
@@ -52,7 +58,8 @@ export async function authenticateToken(req, res, next) {
 
       req.user = {
         ...adminUser,
-        id: customerId, // valid users.id for user tables (carts, wishlists, orders)
+        id: adminUser.id, // primary ID for admin controllers (getMe, updateMe)
+        customerId: customerId, // valid users.id for user tables (carts, wishlists, orders)
         adminId: adminUser.id,
         roleName: USER_TYPES[adminUser.user_type] || 'SUPER_ADMIN',
         permissions: ROLE_PERMISSIONS[adminUser.user_type] || ['all'],
