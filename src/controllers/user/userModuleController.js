@@ -220,6 +220,9 @@ export const getProductsAsPerModule = async (req, res) => {
       SELECT p.*
       FROM products p
       WHERE p.module_id = $1
+          AND p.status = 1
+
+
     `;
 
     const params = [Number(moduleId)];
