@@ -413,24 +413,30 @@ export const getFilteredBrandLogos = async (req, res) => {
   try {
     const moduleIds = toIdArray(req.query.moduleIds);
     const categoryIds = toIdArray(req.query.categoryIds);
+    const limit = parseId(req.query.limit);
 
-    const { rows } = await db.query(
-      `
+    let queryText = `
       SELECT ${BRAND_LOGO_COLUMNS}
       FROM brand_logos
-      WHERE status <> 2
+      WHERE status = 1
         AND EXISTS (
           SELECT 1
           FROM products p
           WHERE p.brand_id = brand_logos.id
-            AND p.status <> 2  -- adjust/remove to match your products table
+            AND p.status = 1
             AND (cardinality($1::int[]) = 0 OR p.module_id   = ANY($1::int[]))
             AND (cardinality($2::int[]) = 0 OR p.category_id = ANY($2::int[]))
         )
       ORDER BY sort_order ASC, id ASC
-      `,
-      [moduleIds, categoryIds]
-    );
+    `;
+
+    const params = [moduleIds, categoryIds];
+    if (limit) {
+      params.push(limit);
+      queryText += ` LIMIT $${params.length}`;
+    }
+
+    const { rows } = await db.query(queryText, params);
 
     const brandLogos = rows.map(toApiBrandLogo);
 
