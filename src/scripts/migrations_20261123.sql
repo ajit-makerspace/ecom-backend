@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS public.bulk_enquiries (
     pincode VARCHAR(20),
     requirements TEXT,
     items JSONB DEFAULT '[]'::jsonb,
+    file_url TEXT,
+    file_name VARCHAR(255),
+    media_id INTEGER REFERENCES public.media_files(id) ON DELETE SET NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
