@@ -88,7 +88,7 @@ jobs:
             else
               APP_DIR="/var/www/shop/ecom-backend"
               APP_NAME="ecom-backend-test"
-              APP_PORT="3013"
+              APP_PORT="3016"
             fi
             BRANCH="${{ github.ref_name }}"
 
