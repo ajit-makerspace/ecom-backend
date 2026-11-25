@@ -24,14 +24,26 @@ export function getFiscalYearCode(date = new Date()) {
  * e.g., MSM26271001
  * 2627 = fiscal year
  * 1001 = four digit order id starting sequence
+ *
+ * Concurrency-Safe: Uses an atomic sequence counter table (order_sequences)
+ * with ON CONFLICT DO UPDATE row-level locking to completely eliminate
+ * race conditions during simultaneous checkouts.
  */
 export async function generateOrderNumber(clientOrDb = db, date = new Date()) {
   const fy = getFiscalYearCode(date);
   const prefix = `MSM${fy}`;
 
   try {
-    // Find the maximum sequence number for the current fiscal year prefix
-    const { rows } = await clientOrDb.query(
+    // 1. Ensure order_sequences tracking table exists
+    await clientOrDb.query(`
+      CREATE TABLE IF NOT EXISTS order_sequences (
+        fy VARCHAR(8) PRIMARY KEY,
+        last_seq BIGINT NOT NULL DEFAULT 1000
+      )
+    `);
+
+    // 2. Determine initial seed sequence from existing orders if row doesn't exist
+    const seedRes = await clientOrDb.query(
       `SELECT COALESCE(
         MAX(NULLIF(regexp_replace(order_number, '^MSM' || $1, ''), '')::bigint),
         1000
@@ -40,22 +52,36 @@ export async function generateOrderNumber(clientOrDb = db, date = new Date()) {
       WHERE order_number ~ ('^MSM' || $1 || '[0-9]+$')`,
       [fy]
     );
+    const existingMax = seedRes.rows[0]?.max_seq ? parseInt(seedRes.rows[0].max_seq, 10) : 1000;
+    const initialSeed = Math.max(existingMax, 1000);
 
-    const maxSeq = rows[0]?.max_seq ? parseInt(rows[0].max_seq, 10) : 1000;
-    const nextSeq = Math.max(maxSeq, 1000) + 1;
+    // 3. Atomically advance the sequence for this fiscal year with row-level lock
+    const { rows } = await clientOrDb.query(
+      `INSERT INTO order_sequences (fy, last_seq)
+       VALUES ($1, $2 + 1)
+       ON CONFLICT (fy)
+       DO UPDATE SET last_seq = GREATEST(order_sequences.last_seq, $2) + 1
+       RETURNING last_seq`,
+      [fy, initialSeed]
+    );
+
+    const nextSeq = rows[0]?.last_seq || initialSeed + 1;
     return `${prefix}${nextSeq}`;
   } catch (err) {
-    console.error('Error in generateOrderNumber query:', err);
+    console.error('Error in atomic generateOrderNumber:', err);
     try {
+      // Secondary fallback with high-resolution entropy to prevent collision
       const countRes = await clientOrDb.query(
         `SELECT COUNT(*)::int AS count FROM orders WHERE order_number LIKE $1`,
         [`${prefix}%`]
       );
       const count = countRes.rows[0]?.count || 0;
-      return `${prefix}${1001 + count}`;
+      const entropy = Math.floor(100 + Math.random() * 899);
+      return `${prefix}${1001 + count}${entropy}`;
     } catch (fallbackErr) {
       console.error('Error in generateOrderNumber fallback:', fallbackErr);
-      return `${prefix}${Math.floor(1001 + Math.random() * 8999)}`;
+      const fallbackSuffix = Date.now().toString().slice(-4);
+      return `${prefix}${fallbackSuffix}`;
     }
   }
 }

@@ -8,6 +8,15 @@ export async function getStoreChatbotIntents(req, res) {
   try {
     const { category, search } = req.query;
 
+    // Self-healing database migration for legacy account/profile action_url
+    try {
+      await db.query(`
+        UPDATE chatbot_intents
+        SET action_url = '/profile'
+        WHERE action_url IN ('/user/account', '/account', '/user/profile')
+      `);
+    } catch {}
+
     let query = `
       SELECT 
         id,
@@ -16,7 +25,10 @@ export async function getStoreChatbotIntents(req, res) {
         answer,
         keywords,
         action_label AS "actionLabel",
-        action_url AS "actionUrl",
+        CASE 
+          WHEN action_url IN ('/user/account', '/account', '/user/profile') THEN '/profile'
+          ELSE action_url 
+        END AS "actionUrl",
         sort_order AS "sortOrder"
       FROM chatbot_intents
       WHERE status = 1

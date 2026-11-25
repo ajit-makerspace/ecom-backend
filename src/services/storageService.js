@@ -4,6 +4,24 @@ import db from '../config/db.js';
 import ftpService from './ftpStorageService.js';
 
 /**
+ * Safely resolves a path relative to a base directory and verifies it is confined within baseDir.
+ * Prevents directory traversal attacks (e.g. ../../.env).
+ * Returns the absolute resolved path if safe and strictly within baseDir, or null otherwise.
+ */
+export const safePathResolve = (baseDir, ...segments) => {
+  if (!baseDir || segments.some((s) => typeof s !== 'string' || s.includes('\0'))) {
+    return null;
+  }
+  const resolvedBase = path.resolve(baseDir);
+  const resolvedTarget = path.resolve(resolvedBase, ...segments);
+  const relative = path.relative(resolvedBase, resolvedTarget);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return null;
+  }
+  return resolvedTarget;
+};
+
+/**
  * Returns storage configuration parsed from environment variables
  */
 export const getStorageConfig = () => {
@@ -45,7 +63,8 @@ export const getInternalFilesDir = () => {
 export const getLocalFilePath = (folder = 'general', filename) => {
   const root = getInternalFilesDir();
   const safeFolder = (folder || 'general').replace(/[^a-zA-Z0-9_-]/g, '');
-  return path.join(root, safeFolder, filename);
+  const safeFilename = path.basename(filename || '');
+  return safePathResolve(root, safeFolder, safeFilename) || path.join(root, safeFolder, safeFilename);
 };
 
 /**
@@ -160,9 +179,9 @@ export const readFile = async ({ storageType, storagePath, filename, folder = 'g
 
   // 1. Check local internal-files directory first (fastest)
   const candidatePaths = [
-    storagePath ? path.join(root, storagePath) : null,
-    folder && filename ? path.join(root, folder, filename) : null,
-    filename ? path.join(root, filename) : null,
+    storagePath ? safePathResolve(root, storagePath) : null,
+    folder && filename ? safePathResolve(root, folder, filename) : null,
+    filename ? safePathResolve(root, filename) : null,
   ].filter(Boolean);
 
   for (const p of candidatePaths) {
@@ -200,8 +219,8 @@ export const readFile = async ({ storageType, storagePath, filename, folder = 'g
   // 3. Fallback: Check classic uploads folder
   const cwdUploads = path.resolve(process.cwd(), 'uploads');
   const legacyPaths = [
-    folder && filename ? path.join(cwdUploads, folder, filename) : null,
-    filename ? path.join(cwdUploads, filename) : null,
+    folder && filename ? safePathResolve(cwdUploads, folder, filename) : null,
+    filename ? safePathResolve(cwdUploads, filename) : null,
   ].filter(Boolean);
 
   for (const lp of legacyPaths) {
@@ -441,6 +460,7 @@ export const getStorageDiagnostics = async () => {
 };
 
 export default {
+  safePathResolve,
   getStorageConfig,
   getInternalFilesDir,
   getLocalFilePath,
