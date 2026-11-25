@@ -206,15 +206,21 @@ export const getCart = async (req, res) => {
 export const addToCart = async (req, res) => {
   try {
     const { productId, quantity = 1 } = req.body;
-    const qty = parseInt(quantity, 10) || 1;
+    const parsedQty = Number(quantity);
 
     if (!productId) {
       return res.status(400).json({ success: false, message: 'Product ID is required.' });
     }
 
-    if (qty <= 0) {
-      return res.status(400).json({ success: false, message: 'Quantity must be at least 1.' });
+    if (!Number.isInteger(parsedQty) || parsedQty <= 0) {
+      return res.status(400).json({ success: false, message: 'Quantity must be a positive integer.' });
     }
+
+    if (parsedQty > 999) {
+      return res.status(400).json({ success: false, message: 'Quantity cannot exceed 999 per item.' });
+    }
+
+    const qty = parsedQty;
 
     // Verify product exists and is active
     const prodRes = await db.query('SELECT id, name, status, price FROM products WHERE id = $1', [productId]);
@@ -265,26 +271,36 @@ export const updateCartItem = async (req, res) => {
     const cart = await getOrCreateCart(req);
 
     if (quantity !== undefined) {
-      const newQty = parseInt(quantity, 10);
-      if (newQty <= 0) {
+      const parsedQty = Number(quantity);
+      if (!Number.isInteger(parsedQty)) {
+        return res.status(400).json({ success: false, message: 'Quantity must be a valid integer.' });
+      }
+      if (parsedQty <= 0) {
         await db.query('DELETE FROM cart_items WHERE cart_id = $1 AND product_id = $2', [cart.id, productId]);
+      } else if (parsedQty > 999) {
+        return res.status(400).json({ success: false, message: 'Quantity cannot exceed 999 per item.' });
       } else {
         await db.query(
           'UPDATE cart_items SET quantity = $1, updated_at = NOW() WHERE cart_id = $2 AND product_id = $3',
-          [newQty, cart.id, productId]
+          [parsedQty, cart.id, productId]
         );
       }
     } else if (delta !== undefined) {
-      const deltaNum = parseInt(delta, 10);
+      const parsedDelta = Number(delta);
+      if (!Number.isInteger(parsedDelta)) {
+        return res.status(400).json({ success: false, message: 'Delta must be a valid integer.' });
+      }
       const existing = await db.query(
         'SELECT quantity FROM cart_items WHERE cart_id = $1 AND product_id = $2',
         [cart.id, productId]
       );
 
       if (existing.rows.length > 0) {
-        const nextQty = existing.rows[0].quantity + deltaNum;
+        const nextQty = existing.rows[0].quantity + parsedDelta;
         if (nextQty <= 0) {
           await db.query('DELETE FROM cart_items WHERE cart_id = $1 AND product_id = $2', [cart.id, productId]);
+        } else if (nextQty > 999) {
+          return res.status(400).json({ success: false, message: 'Quantity cannot exceed 999 per item.' });
         } else {
           await db.query(
             'UPDATE cart_items SET quantity = $1, updated_at = NOW() WHERE cart_id = $2 AND product_id = $3',

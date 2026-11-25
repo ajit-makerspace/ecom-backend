@@ -123,10 +123,17 @@ export const placeOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Order must contain at least one item.' });
     }
 
-    if (!finalEmail || !finalFirstName || !finalAddress || !finalCity || !finalZip) {
+    const isInvalidAddress =
+      !finalAddress ||
+      !finalCity ||
+      !finalZip ||
+      finalAddress.trim().toLowerCase() === 'primary delivery address' ||
+      finalAddress.trim().length < 5;
+
+    if (!finalEmail || !finalFirstName || isInvalidAddress) {
       return res.status(400).json({
         success: false,
-        message: 'First name, email, shipping address, city, and zip code are required.',
+        message: 'A complete delivery address (street address, city, and postal code) is required.',
       });
     }
 

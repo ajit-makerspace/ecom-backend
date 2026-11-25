@@ -218,6 +218,21 @@ export const verifyRazorpayPayment = async (req, res) => {
       });
     }
 
+    const isInvalidAddress =
+      !finalAddress ||
+      !finalCity ||
+      !finalZip ||
+      finalAddress.trim().toLowerCase() === 'primary delivery address' ||
+      finalAddress.trim().length < 5;
+
+    if (isInvalidAddress) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'A complete delivery address (street address, city, and postal code) is required.',
+      });
+    }
+
     // 1. Verify products & calculate verified totals
     let subtotal = 0;
     const validatedItems = [];
