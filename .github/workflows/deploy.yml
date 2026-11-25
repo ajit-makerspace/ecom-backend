@@ -159,57 +159,32 @@ jobs:
             echo "Validating backend..."
             node --check src/server.js
 
-            echo "Checking port $APP_PORT..."
-
-            if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
-              echo "Existing PM2 application found."
-
-              APP_PID="$(pm2 pid "$APP_NAME" | head -n 1 | tr -d '[:space:]')"
-
-              LISTENER_PIDS="$(
-                ss -lntp "sport = :$APP_PORT" 2>/dev/null |
-                grep -oE 'pid=[0-9]+' |
-                cut -d= -f2 |
-                sort -u || true
-              )"
-
-              if [ -n "$LISTENER_PIDS" ]; then
-                MATCH=0
-
-                for PID in $LISTENER_PIDS; do
-                  if [ "$PID" = "$APP_PID" ]; then
-                    MATCH=1
-                  fi
-                done
-
-                if [ "$MATCH" -ne 1 ]; then
-                  echo "ERROR: Port $APP_PORT belongs to a different process."
-                  echo "PM2 PID: $APP_PID"
-                  echo "Listener PID(s): $LISTENER_PIDS"
-                  echo "No process was terminated."
-                  exit 1
-                fi
+            # Clean up existing PM2 process for this app or any legacy process names
+            echo "Stopping previous PM2 backend instances if present..."
+            for NAME in "$APP_NAME" ecommerce-backend ecom-backend-prod ecom-backend-test; do
+              if pm2 describe "$NAME" >/dev/null 2>&1; then
+                echo "Removing existing PM2 process: $NAME"
+                pm2 delete "$NAME" || true
               fi
+            done
 
-              echo "Restarting existing PM2 application..."
-              PORT="$APP_PORT" pm2 restart "$APP_NAME" --update-env
-
-            else
-              echo "PM2 application not found."
-
+            # Verify that the target port is free
+            echo "Verifying port $APP_PORT..."
+            if ss -lnt "sport = :$APP_PORT" | grep -q LISTEN; then
+              echo "Waiting for port $APP_PORT to clear..."
+              sleep 3
               if ss -lnt "sport = :$APP_PORT" | grep -q LISTEN; then
-                echo "ERROR: Port $APP_PORT is already occupied."
+                echo "ERROR: Port $APP_PORT is occupied by an unmanaged process."
                 ss -lntp "sport = :$APP_PORT" || true
                 exit 1
               fi
-
-              echo "Starting application..."
-              PORT="$APP_PORT" pm2 start src/server.js \
-                --name "$APP_NAME" \
-                --update-env
             fi
 
-            echo "Saving PM2 process list..."
+            echo "Starting backend ($APP_NAME on port $APP_PORT)..."
+            PORT="$APP_PORT" pm2 start src/server.js \
+              --name "$APP_NAME" \
+              --update-env
+
             pm2 save
 
             sleep 5
