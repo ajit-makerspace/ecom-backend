@@ -11,7 +11,7 @@ import {
   getProductReviews,
   addProductReview,
 } from '../../controllers/user/userReviewController.js';
-import { authenticateToken } from '../../middleware/auth.js';
+import { authenticateToken, requireRole } from '../../middleware/auth.js';
 import { getPublicBanners } from '../../controllers/admin/bannerController.js';
 import { getPublicShowcases } from '../../controllers/admin/showcaseController.js';
 import {getBrandFilterOptions, getFilteredBrandLogos, getUserBrandLogos, updateBrandLogo} from '../../controllers/admin/brandRibbonController.js';
@@ -32,7 +32,7 @@ router.get('/banners', getPublicBanners);
 router.get('/showcases', getPublicShowcases);
 router.get('/brand-logos', getUserBrandLogos);
 router.get('/customer-logos', getUserCustomerLogos);
-router.put('/brand-logos/:id', updateBrandLogo);
+router.put('/brand-logos/:id', authenticateToken, requireRole([1, 5]), updateBrandLogo);
 router.get('/brand-logos/filter', getFilteredBrandLogos);
 router.get('/brand-logos/filter-options', getBrandFilterOptions);
 router.get('/contact-info', getStoreContactInfo);

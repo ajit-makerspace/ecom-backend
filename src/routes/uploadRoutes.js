@@ -3,8 +3,11 @@ import { multerUpload, handleSingleUpload, handleBase64Upload } from '../control
 import ftpService from '../services/ftpStorageService.js';
 import storageService from '../services/storageService.js';
 import { runFtpSync } from '../services/ftpSyncCron.js';
+import { authenticateToken, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
+
+const adminStorageAuth = [authenticateToken, requireRole([1, 4, 5])];
 
 // Middleware to handle either 'file' or 'image' field in form-data
 const uploadFileMiddleware = (req, res, next) => {
@@ -31,13 +34,13 @@ const uploadFileMiddleware = (req, res, next) => {
 };
 
 // General upload endpoint (handles multipart/form-data)
-router.post('/upload', uploadFileMiddleware, handleSingleUpload);
+router.post('/upload', adminStorageAuth, uploadFileMiddleware, handleSingleUpload);
 
 // Programmatic / fallback Base64 upload endpoint
-router.post('/upload/base64', handleBase64Upload);
+router.post('/upload/base64', adminStorageAuth, handleBase64Upload);
 
 // Admin-specific upload endpoint
-router.post('/admin/upload', uploadFileMiddleware, handleSingleUpload);
+router.post('/admin/upload', adminStorageAuth, uploadFileMiddleware, handleSingleUpload);
 
 // Check FTP storage connection status & diagnostic details
 const getFtpStatusHandler = async (req, res) => {
@@ -52,8 +55,8 @@ const getFtpStatusHandler = async (req, res) => {
   }
 };
 
-router.get('/ftp-status', getFtpStatusHandler);
-router.get('/upload/ftp-status', getFtpStatusHandler);
+router.get('/ftp-status', adminStorageAuth, getFtpStatusHandler);
+router.get('/upload/ftp-status', adminStorageAuth, getFtpStatusHandler);
 
 // Trigger manual FTP synchronization for pending local files
 const handleFtpSync = async (req, res) => {
@@ -72,12 +75,12 @@ const handleFtpSync = async (req, res) => {
   }
 };
 
-router.post('/upload/sync-ftp', handleFtpSync);
-router.get('/upload/sync-ftp', handleFtpSync);
-router.post('/admin/storage/sync-ftp', handleFtpSync);
+router.post('/upload/sync-ftp', adminStorageAuth, handleFtpSync);
+router.get('/upload/sync-ftp', adminStorageAuth, handleFtpSync);
+router.post('/admin/storage/sync-ftp', adminStorageAuth, handleFtpSync);
 
 // Detailed storage status & diagnostics
-router.get('/storage-status', async (req, res) => {
+router.get('/storage-status', adminStorageAuth, async (req, res) => {
   try {
     const diagnostics = await storageService.getStorageDiagnostics();
     return res.json({ success: true, ...diagnostics });
