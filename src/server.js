@@ -238,11 +238,11 @@ app.get(['/api/product-images/:id', '/api/product-images/file/:filename'], async
       });
       if (data) {
         if (req.query.download === 'true' || req.query.download === '1') {
-      const downloadName = file.original_name || file.filename || `file-${id}`;
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloadName)}"`);
-    }
+          const downloadName = file.original_name || file.filename || `file-${param}`;
+          res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloadName)}"`);
+        }
 
-    return sendFileBuffer(res, data, file.filename, req.headers.range, file.mime_type);
+        return sendFileBuffer(res, data, file.filename, req.headers.range, file.mime_type);
       }
     }
 
@@ -271,6 +271,12 @@ app.get(['/api/product-images/:id', '/api/product-images/file/:filename'], async
 app.get('/api/media/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Reject path traversal, absolute paths, or null bytes
+    if (!id || id.includes('..') || path.isAbsolute(id) || id.includes('\0')) {
+      return res.status(400).send('Invalid media identifier');
+    }
+
     const isNumeric = /^\d+$/.test(id);
     const query = isNumeric
       ? 'SELECT mime_type, data, storage_type, storage_path, filename, folder, file_size, original_name FROM media_files WHERE id = $1'
@@ -278,12 +284,17 @@ app.get('/api/media/:id', async (req, res) => {
     const { rows } = await db.query(query, [id]);
 
     if (rows.length === 0) {
-      // Direct local file fallback in internal-files
+      // Direct local file fallback in internal-files (strictly confined to internalFilesDir)
       const internalFilesDir = storageService.getInternalFilesDir();
-      const directLocalPath = path.join(internalFilesDir, id);
-      if (fs.existsSync(directLocalPath)) {
-        const data = await fs.promises.readFile(directLocalPath);
-        return sendFileBuffer(res, data, id, req.headers.range);
+      const directLocalPath = storageService.safePathResolve(internalFilesDir, id);
+      if (directLocalPath && fs.existsSync(directLocalPath)) {
+        try {
+          const stat = await fs.promises.stat(directLocalPath);
+          if (stat.isFile()) {
+            const data = await fs.promises.readFile(directLocalPath);
+            return sendFileBuffer(res, data, path.basename(id), req.headers.range);
+          }
+        } catch {}
       }
       const placeholderSvg = Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="60" viewBox="0 0 180 60"><rect width="100%" height="100%" fill="#f8fafc" rx="6" stroke="#e2e8f0" stroke-width="1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#94a3b8">Not Found</text></svg>`
@@ -337,21 +348,35 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 app.get('/uploads/*', async (req, res, next) => {
   try {
     const rawPath = req.params[0] || '';
+    if (!rawPath || rawPath.includes('..') || path.isAbsolute(rawPath) || rawPath.includes('\0')) {
+      return res.status(400).send('Invalid file path');
+    }
+
     const filename = path.basename(rawPath);
-    if (!filename) return next();
+    if (!filename || filename === '.' || filename === '..') return next();
 
     // 1. Check local /internal-files directory first
     const internalFilesDir = storageService.getInternalFilesDir();
-    const localInternalPath = path.join(internalFilesDir, rawPath);
-    const altInternalPath = path.join(internalFilesDir, filename);
+    const localInternalPath = storageService.safePathResolve(internalFilesDir, rawPath);
+    const altInternalPath = storageService.safePathResolve(internalFilesDir, filename);
 
-    if (fs.existsSync(localInternalPath)) {
-      const data = await fs.promises.readFile(localInternalPath);
-      return sendFileBuffer(res, data, filename, req.headers.range);
+    if (localInternalPath && fs.existsSync(localInternalPath)) {
+      try {
+        const stat = await fs.promises.stat(localInternalPath);
+        if (stat.isFile()) {
+          const data = await fs.promises.readFile(localInternalPath);
+          return sendFileBuffer(res, data, filename, req.headers.range);
+        }
+      } catch {}
     }
-    if (fs.existsSync(altInternalPath)) {
-      const data = await fs.promises.readFile(altInternalPath);
-      return sendFileBuffer(res, data, filename, req.headers.range);
+    if (altInternalPath && fs.existsSync(altInternalPath)) {
+      try {
+        const stat = await fs.promises.stat(altInternalPath);
+        if (stat.isFile()) {
+          const data = await fs.promises.readFile(altInternalPath);
+          return sendFileBuffer(res, data, filename, req.headers.range);
+        }
+      } catch {}
     }
 
     // 2. Check PostgreSQL media_files table metadata (resolves from /internal-files or FTP)
