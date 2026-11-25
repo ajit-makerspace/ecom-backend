@@ -46,8 +46,8 @@ jobs:
         id: prep_env
         env:
           TARGET_ENV: ${{ inputs.environment || 'testing' }}
-          TEST_ENV: ${{ secrets.SERVER_ENV_TEST || secrets.SERVER_ENV }}
-          PROD_ENV: ${{ secrets.SERVER_ENV_PROD || secrets.SERVER_ENV }}
+          TEST_ENV: ${{ secrets.BACKEND_ENV_TEST || secrets.SERVER_ENV_TEST || secrets.SERVER_ENV }}
+          PROD_ENV: ${{ secrets.BACKEND_ENV_PROD || secrets.SERVER_ENV_PROD || secrets.SERVER_ENV }}
         run: |
           if [ "$TARGET_ENV" = "production" ] && [ -n "$PROD_ENV" ]; then
             SELECTED_ENV="$PROD_ENV"
@@ -121,14 +121,21 @@ jobs:
               exit 1
             }
 
-            echo "Configuring production environment..."
+            echo "Configuring environment for $ENV_NAME..."
             umask 077
             if [ -n "${ENV_B64:-}" ]; then
-              echo "Writing .env from GitHub Secret..."
-              printf '%s' "$ENV_B64" | base64 -d > .env
-              chmod 600 .env
-            elif [ ! -f .env ]; then
-              echo "ERROR: .env file is missing and SERVER_ENV secret is not configured!"
+              echo "Writing environment files from GitHub Secrets..."
+              if [ "$ENV_NAME" = "production" ]; then
+                printf '%s' "$ENV_B64" | base64 -d > .env.production
+                chmod 600 .env.production
+                cp .env.production .env
+              else
+                printf '%s' "$ENV_B64" | base64 -d > .env.testing
+                chmod 600 .env.testing
+                cp .env.testing .env
+              fi
+            elif [ ! -f .env.production ] && [ ! -f .env ]; then
+              echo "ERROR: .env file is missing and no environment secret is configured!"
               exit 1
             fi
 
