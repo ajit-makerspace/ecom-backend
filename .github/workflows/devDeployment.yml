@@ -84,11 +84,11 @@ jobs:
             if [ "$ENV_NAME" = "production" ]; then
               APP_DIR="/var/www/shop-prod/ecom-backend"
               APP_NAME="ecom-backend-prod"
-              APP_PORT="3014"
+              APP_PORT="3056"
             else
               APP_DIR="/var/www/shop/ecom-backend"
               APP_NAME="ecom-backend-test"
-              APP_PORT="3016"
+              APP_PORT="3058"
             fi
             BRANCH="${{ github.ref_name }}"
 
@@ -152,14 +152,16 @@ jobs:
             echo "Validating backend..."
             node --check src/server.js
 
-            # Clean up existing PM2 process for this app or any legacy process names
-            echo "Stopping previous PM2 backend instances if present..."
-            for NAME in "$APP_NAME" ecom-backend-test ecommerce-backend-test; do
-              if pm2 describe "$NAME" >/dev/null 2>&1; then
-                echo "Removing existing PM2 process: $NAME"
-                pm2 delete "$NAME" || true
-              fi
-            done
+            # Clean up existing PM2 process for this app or legacy process names
+            echo "Stopping previous PM2 backend instances for $APP_NAME..."
+            if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
+              echo "Removing existing PM2 process: $APP_NAME"
+              pm2 delete "$APP_NAME" || true
+            fi
+            if pm2 describe "ecommerce-backend-test" >/dev/null 2>&1; then
+              echo "Removing legacy PM2 process: ecommerce-backend-test"
+              pm2 delete "ecommerce-backend-test" || true
+            fi
 
             # Verify that the target port is free
             echo "Verifying port $APP_PORT..."
