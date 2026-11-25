@@ -215,14 +215,8 @@ export const loginUser = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Your account has been deactivated. Please contact support.' });
     }
 
-    // Verify bcrypt hash securely, allowing standard test credentials in dev environments
-    let isPasswordValid = await bcrypt.compare(cleanPassword, user.password_hash || '');
-    if (!isPasswordValid && (user.email === 'user@test.com' || user.email === 'customer@makerspace.com')) {
-      if (['user123', 'User123!', 'User1234!', 'Customer123!', 'customer123', 'admin123'].includes(cleanPassword)) {
-        isPasswordValid = true;
-      }
-    }
-
+    // Verify bcrypt hash securely
+    const isPasswordValid = await bcrypt.compare(cleanPassword, user.password_hash || '');
     if (!isPasswordValid) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
@@ -685,8 +679,14 @@ export const googleLoginUser = async (req, res) => {
       const expectedClientId =
         process.env.GOOGLE_CLIENT_ID ||
         '237399104322-0bbsognkgnb8d9dshehjl8roeb6fvdkv.apps.googleusercontent.com';
+
+      // Enforce strict audience validation to prevent cross-app token reuse exploits
       if (data.aud !== expectedClientId) {
-        console.warn(`[Google OAuth Warning] Token audience ${data.aud} did not match expected client ID.`);
+        console.warn(`[Google OAuth Security Alert] Token audience "${data.aud}" does not match expected client ID "${expectedClientId}". Rejecting authentication.`);
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid Google token audience.',
+        });
       }
 
       if (data.email_verified !== 'true' && data.email_verified !== true) {
@@ -704,7 +704,33 @@ export const googleLoginUser = async (req, res) => {
         picture: data.picture || null,
       };
     } else if (accessToken) {
-      // 2. Verify via Access Token
+      const expectedClientId =
+        process.env.GOOGLE_CLIENT_ID ||
+        '237399104322-0bbsognkgnb8d9dshehjl8roeb6fvdkv.apps.googleusercontent.com';
+
+      // 2. Verify Access Token audience via Google TokenInfo to prevent cross-app token reuse
+      const tokenInfoRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`
+      );
+      const tokenInfo = await tokenInfoRes.json();
+
+      if (!tokenInfoRes.ok || tokenInfo.error) {
+        return res.status(401).json({
+          success: false,
+          message: tokenInfo.error_description || 'Invalid or expired Google access token.',
+        });
+      }
+
+      const tokenAud = tokenInfo.aud || tokenInfo.issued_to;
+      if (tokenAud !== expectedClientId) {
+        console.warn(`[Google OAuth Security Alert] Access token audience "${tokenAud}" does not match expected client ID "${expectedClientId}". Rejecting authentication.`);
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid Google access token audience.',
+        });
+      }
+
+      // Fetch verified user profile
       const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -723,6 +749,13 @@ export const googleLoginUser = async (req, res) => {
         return res.status(400).json({
           success: false,
           message: 'Unable to retrieve email from Google profile.',
+        });
+      }
+
+      if (data.email_verified !== 'true' && data.email_verified !== true) {
+        return res.status(400).json({
+          success: false,
+          message: 'Google email address is not verified.',
         });
       }
 

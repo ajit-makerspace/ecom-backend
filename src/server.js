@@ -237,7 +237,12 @@ app.get(['/api/product-images/:id', '/api/product-images/file/:filename'], async
         folder: file.folder,
       });
       if (data) {
-        return sendFileBuffer(res, data, file.filename, req.headers.range, file.mime_type);
+        if (req.query.download === 'true' || req.query.download === '1') {
+      const downloadName = file.original_name || file.filename || `file-${id}`;
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloadName)}"`);
+    }
+
+    return sendFileBuffer(res, data, file.filename, req.headers.range, file.mime_type);
       }
     }
 
@@ -268,8 +273,8 @@ app.get('/api/media/:id', async (req, res) => {
     const { id } = req.params;
     const isNumeric = /^\d+$/.test(id);
     const query = isNumeric
-      ? 'SELECT mime_type, data, storage_type, storage_path, filename, folder, file_size FROM media_files WHERE id = $1'
-      : 'SELECT mime_type, data, storage_type, storage_path, filename, folder, file_size FROM media_files WHERE filename = $1 LIMIT 1';
+      ? 'SELECT mime_type, data, storage_type, storage_path, filename, folder, file_size, original_name FROM media_files WHERE id = $1'
+      : 'SELECT mime_type, data, storage_type, storage_path, filename, folder, file_size, original_name FROM media_files WHERE filename = $1 LIMIT 1';
     const { rows } = await db.query(query, [id]);
 
     if (rows.length === 0) {
@@ -311,6 +316,11 @@ app.get('/api/media/:id', async (req, res) => {
         `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="60" viewBox="0 0 180 60"><rect width="100%" height="100%" fill="#f8fafc" rx="6" stroke="#e2e8f0" stroke-width="1"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#64748b">${cleanLabel}</text></svg>`
       );
       return sendFileBuffer(res, placeholderSvg, `${file.filename || id}.svg`, req.headers.range, 'image/svg+xml');
+    }
+
+    if (req.query.download === 'true' || req.query.download === '1') {
+      const downloadName = file.original_name || file.filename || `file-${id}`;
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloadName)}"`);
     }
 
     return sendFileBuffer(res, data, file.filename, req.headers.range, file.mime_type);
@@ -438,6 +448,7 @@ app.use('/api/admin', customerLogoRoutes);
 app.use('/api/admin', competitionRoutes);
 app.use('/api/admin', warehouseRoutes);
 app.use('/api/admin', blogsRoutes);
+app.use('/api/admin', userEnquiryRoutes);
 app.use('/api', shippingRoutes);
 app.use('/api', printRequestRoutes);
 
