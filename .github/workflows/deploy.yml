@@ -87,14 +87,21 @@ jobs:
           script: |
             set -eu
 
-            APP_DIR="/var/www/shop/ecom-backend"
-            APP_NAME="ecommerce-backend"
+            # Target configuration for dev vs prod isolation
+            if [ "$ENV_NAME" = "production" ]; then
+              APP_DIR="/var/www/shop-prod/ecom-backend"
+              APP_NAME="ecom-backend-prod"
+              APP_PORT="3014"
+            else
+              APP_DIR="/var/www/shop/ecom-backend"
+              APP_NAME="ecom-backend-test"
+              APP_PORT="3016"
+            fi
             BRANCH="${{ github.ref_name }}"
-            APP_PORT="3014"
 
             echo "Starting e-commerce backend deployment for $ENV_NAME (branch: $BRANCH)..."
 
-            mkdir -p /var/www/shop
+            mkdir -p "$(dirname "$APP_DIR")"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
@@ -214,7 +221,7 @@ jobs:
               process.stdin.on("data", chunk => data += chunk);
               process.stdin.on("end", () => {
                 const apps = JSON.parse(data);
-                const app = apps.find(p => p.name === "ecommerce-backend");
+                const app = apps.find(p => p.name === "'"$APP_NAME"'");
                 console.log(app ? app.pm2_env.status : "missing");
               });
             ')"
