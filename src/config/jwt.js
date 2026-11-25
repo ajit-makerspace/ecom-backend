@@ -1,5 +1,4 @@
-import dotenv from 'dotenv';
-dotenv.config();
+import './env.js';
 
 if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
   throw new Error('FATAL: JWT_SECRET environment variable must be defined in production.');

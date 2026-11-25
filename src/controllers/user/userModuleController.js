@@ -117,12 +117,32 @@ import db from '../../config/db.js';
 
 export const getUserModules = async (req, res) => {
   try {
-    const result = await db.query(
-      `SELECT id, name, slug, image_url AS "imageUrl"
-         FROM modules
-        WHERE status = 1
-        ORDER BY id ASC`
-    );
+    const minKits = parseInt(req.query.min_kits, 10) || (req.query.has_kits === 'true' ? 1 : 0);
+    const limit = parseInt(req.query.limit, 10) || null;
+
+    let query = `
+      SELECT m.id, m.name, m.slug, m.image_url AS "imageUrl"
+      FROM modules m
+      WHERE m.status = 1
+    `;
+    const params = [];
+
+    if (minKits > 0) {
+      params.push(minKits);
+      query += ` AND (
+        SELECT COUNT(*) FROM products p 
+        WHERE p.module_id = m.id AND p.is_kit = true AND p.status = 1
+      ) >= $${params.length}`;
+    }
+
+    query += ` ORDER BY m.id ASC`;
+
+    if (limit && limit > 0) {
+      params.push(limit);
+      query += ` LIMIT $${params.length}`;
+    }
+
+    const result = await db.query(query, params);
     return res.json({
       success: true,
       modules: result.rows,
@@ -220,6 +240,9 @@ export const getProductsAsPerModule = async (req, res) => {
       SELECT p.*
       FROM products p
       WHERE p.module_id = $1
+          AND p.status = 1
+
+
     `;
 
     const params = [Number(moduleId)];
