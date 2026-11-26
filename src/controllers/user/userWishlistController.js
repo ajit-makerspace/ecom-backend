@@ -27,6 +27,59 @@ async function getOrCreateWishlist(userId) {
 }
 
 /**
+ * Helper to fetch full products data for active wishlist
+ */
+async function getWishlistFullData(wishlistId) {
+  const { rows } = await db.query(
+    `SELECT 
+       wi.id AS wishlist_item_id,
+       wi.product_id,
+       wi.created_at AS added_at,
+       p.id,
+       p.name,
+       p.slug,
+       p.price,
+       p.old_price AS "oldPrice",
+       p.rating,
+       p.reviews_count AS "reviewsCount",
+       p.stock,
+       p.sku,
+       p.category_id,
+       p.status,
+       c.name AS "categoryName",
+       COALESCE(p.image_url, '/placeholder.jpg') AS image,
+       p.images
+     FROM wishlist_items wi
+     JOIN products p ON wi.product_id = p.id
+     LEFT JOIN categories c ON p.category_id = c.id
+     WHERE wi.wishlist_id = $1 AND p.status = 1
+     ORDER BY wi.created_at DESC`,
+    [wishlistId]
+  );
+
+  const items = rows.map((r) => {
+    let imagesArr = [];
+    if (Array.isArray(r.images)) {
+      imagesArr = r.images;
+    } else if (typeof r.images === 'string') {
+      try { imagesArr = JSON.parse(r.images); } catch (e) { imagesArr = []; }
+    }
+    if (imagesArr.length === 0 && r.image) {
+      imagesArr = [r.image];
+    }
+    return {
+      ...r,
+      images: imagesArr,
+    };
+  });
+
+  return {
+    items,
+    productIds: items.map((r) => r.id),
+  };
+}
+
+/**
  * GET /api/user/wishlist
  * Fetch customer's active wishlist with full product details
  */
@@ -42,54 +95,13 @@ export const getWishlist = async (req, res) => {
       return res.json({ success: true, wishlistId: null, items: [], productIds: [] });
     }
 
-    const { rows } = await db.query(
-      `SELECT 
-         wi.id AS wishlist_item_id,
-         wi.product_id,
-         wi.created_at AS added_at,
-         p.id,
-         p.name,
-         p.slug,
-         p.price,
-         p.old_price AS "oldPrice",
-         p.rating,
-         p.reviews_count AS "reviewsCount",
-         p.stock,
-         p.sku,
-         p.category_id,
-         p.status,
-         c.name AS "categoryName",
-         COALESCE(p.image_url, '/placeholder.jpg') AS image,
-         p.images
-       FROM wishlist_items wi
-       JOIN products p ON wi.product_id = p.id
-       LEFT JOIN categories c ON p.category_id = c.id
-       WHERE wi.wishlist_id = $1 AND p.status = 1
-       ORDER BY wi.created_at DESC`,
-      [wishlist.id]
-    );
-
-    const items = rows.map((r) => {
-      let imagesArr = [];
-      if (Array.isArray(r.images)) {
-        imagesArr = r.images;
-      } else if (typeof r.images === 'string') {
-        try { imagesArr = JSON.parse(r.images); } catch (e) { imagesArr = []; }
-      }
-      if (imagesArr.length === 0 && r.image) {
-        imagesArr = [r.image];
-      }
-      return {
-        ...r,
-        images: imagesArr,
-      };
-    });
+    const { items, productIds } = await getWishlistFullData(wishlist.id);
 
     return res.json({
       success: true,
       wishlistId: wishlist.id,
       items,
-      productIds: items.map((r) => r.id),
+      productIds,
       totalCount: items.length,
     });
   } catch (err) {
@@ -149,21 +161,77 @@ export const toggleWishlistItem = async (req, res) => {
       message = 'Item added to your saved wishlist!';
     }
 
-    // Return updated product IDs list
-    const { rows } = await db.query(
-      'SELECT product_id FROM wishlist_items WHERE wishlist_id = $1',
-      [wishlist.id]
-    );
+    // Return updated product full data and IDs
+    const { items, productIds } = await getWishlistFullData(wishlist.id);
 
     return res.json({
       success: true,
       inWishlist,
       message,
-      productIds: rows.map((r) => r.product_id),
+      items,
+      productIds,
+      totalCount: items.length,
     });
   } catch (err) {
     console.error('toggleWishlistItem error:', err);
     return res.status(500).json({ success: false, message: 'Failed to update wishlist.' });
+  }
+};
+
+/**
+ * POST /api/user/wishlist/add
+ * Explicitly add product to wishlist (idempotent: adds if not present, keeps if already present)
+ */
+export const addToWishlistItem = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { productId, productVariantId } = req.body;
+
+    if (!userId) {
+      return res.json({
+        success: true,
+        isGuest: true,
+        message: 'Wishlist updated for guest.',
+      });
+    }
+
+    const prodIdNum = parseInt(productId, 10);
+    if (!prodIdNum || isNaN(prodIdNum)) {
+      return res.status(400).json({ success: false, message: 'Valid productId is required.' });
+    }
+
+    const wishlist = await getOrCreateWishlist(userId);
+
+    // Check if product already exists in wishlist
+    const existing = await db.query(
+      'SELECT id FROM wishlist_items WHERE wishlist_id = $1 AND product_id = $2',
+      [wishlist.id, prodIdNum]
+    );
+
+    if (existing.rows.length === 0) {
+      // Add to wishlist
+      await db.query(
+        `INSERT INTO wishlist_items (wishlist_id, product_id, product_variant_id, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [wishlist.id, prodIdNum, productVariantId || null]
+      );
+      await db.query('UPDATE wishlists SET updated_at = NOW() WHERE id = $1', [wishlist.id]);
+    }
+
+    // Return updated product full data and IDs
+    const { items, productIds } = await getWishlistFullData(wishlist.id);
+
+    return res.json({
+      success: true,
+      inWishlist: true,
+      message: 'Item added to your saved wishlist!',
+      items,
+      productIds,
+      totalCount: items.length,
+    });
+  } catch (err) {
+    console.error('addToWishlistItem error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to add item to wishlist.' });
   }
 };
 
@@ -190,15 +258,14 @@ export const removeWishlistItem = async (req, res) => {
     await db.query('DELETE FROM wishlist_items WHERE wishlist_id = $1 AND product_id = $2', [wishlist.id, prodIdNum]);
     await db.query('UPDATE wishlists SET updated_at = NOW() WHERE id = $1', [wishlist.id]);
 
-    const { rows } = await db.query(
-      'SELECT product_id FROM wishlist_items WHERE wishlist_id = $1',
-      [wishlist.id]
-    );
+    const { items, productIds } = await getWishlistFullData(wishlist.id);
 
     return res.json({
       success: true,
       message: 'Item removed from wishlist.',
-      productIds: rows.map((r) => r.product_id),
+      items,
+      productIds,
+      totalCount: items.length,
     });
   } catch (err) {
     console.error('removeWishlistItem error:', err);
