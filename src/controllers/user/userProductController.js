@@ -680,6 +680,12 @@ export const getStoreCategories = async (req, res) => {
         (SELECT COUNT(*)::int FROM products p WHERE p.category_id = c.id AND p.status = 1) AS "productCount"
       FROM categories c
       WHERE c.status = 1
+       AND EXISTS (
+      SELECT 1
+      FROM products p
+      WHERE p.category_id = c.id
+        AND p.status = 1
+    )
       ORDER BY c.name ASC
     `);
 
