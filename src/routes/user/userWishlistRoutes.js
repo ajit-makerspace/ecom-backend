@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getWishlist,
   toggleWishlistItem,
+  addToWishlistItem,
   removeWishlistItem,
   syncWishlist,
 } from '../../controllers/user/userWishlistController.js';
@@ -11,6 +12,7 @@ const router = express.Router();
 
 // Wishlist Endpoints
 router.get('/wishlist', optionalAuth, getWishlist);
+router.post('/wishlist/add', optionalAuth, addToWishlistItem);
 router.post('/wishlist/toggle', optionalAuth, toggleWishlistItem);
 router.delete('/wishlist/items/:productId', optionalAuth, removeWishlistItem);
 router.post('/wishlist/sync', authenticateToken, syncWishlist);
