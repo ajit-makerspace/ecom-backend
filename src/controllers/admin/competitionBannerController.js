@@ -612,9 +612,21 @@ export const getActiveCompetitionBanner = async (req, res) => {
 // COMPETITION CRUD
 // -------------------------------------------------------
 
+export const generateCompetitionSlug = (title, topic, id) => {
+  const parts = [title, topic].filter(Boolean).join(' ');
+  const clean = String(parts || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return clean || (id ? `competition-${id}` : 'competition');
+};
+
 const formatCompetition = (row) => ({
   id: String(row.id),
   title: row.title,
+  slug: row.slug || generateCompetitionSlug(row.title, row.topic, row.id),
   competitionDate: row.competition_date,
   registrationStartDate: row.registration_start_date,
   topic: row.topic,
@@ -632,6 +644,7 @@ const formatCompetition = (row) => ({
 const competitionColumns = `
   id,
   title,
+  slug,
   competition_date,
   registration_start_date,
   topic,
@@ -807,21 +820,60 @@ export const getCompetitionById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    if (!/^\d+$/.test(id)) {
+    if (!id || typeof id !== 'string') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid competition ID.',
+        message: 'Invalid competition identifier.',
       });
     }
 
-    const result = await db.query(
-      `SELECT ${competitionColumns}
-       FROM competitions
-       WHERE id = $1`,
-      [id]
-    );
+    const cleanParam = decodeURIComponent(id).trim();
+    const isNumeric = /^\d+$/.test(cleanParam);
 
-    if (result.rows.length === 0) {
+    let result;
+    if (isNumeric) {
+      result = await db.query(
+        `SELECT ${competitionColumns}
+         FROM competitions
+         WHERE id = $1`,
+        [cleanParam]
+      );
+    } else {
+      result = await db.query(
+        `SELECT ${competitionColumns}
+         FROM competitions
+         WHERE LOWER(slug) = LOWER($1)`,
+        [cleanParam]
+      );
+
+      // Flexible fallback matching if slug differs slightly
+      if (result.rows.length === 0) {
+        const allComps = await db.query(`SELECT ${competitionColumns} FROM competitions`);
+        const targetClean = cleanParam.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        const matched = allComps.rows.find((c) => {
+          const compSlug = (c.slug || '').toLowerCase();
+          const gen1 = generateCompetitionSlug(c.title, c.topic, c.id);
+          const gen2 = `${c.title || ''} ${c.topic || ''}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+          const titleSlug = (c.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+          return (
+            compSlug === cleanParam.toLowerCase() ||
+            compSlug === targetClean ||
+            gen1 === cleanParam.toLowerCase() ||
+            gen1 === targetClean ||
+            gen2 === cleanParam.toLowerCase() ||
+            gen2 === targetClean ||
+            titleSlug === cleanParam.toLowerCase() ||
+            titleSlug === targetClean
+          );
+        });
+
+        if (matched) {
+          result = { rows: [matched] };
+        }
+      }
+    }
+
+    if (!result || result.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Competition not found.',
@@ -872,8 +924,11 @@ if (dateError) {
     const imageValue =
       body.imageUrl !== undefined ? body.imageUrl : body.image;
 
+    const slug = generateCompetitionSlug(body.title, body.topic);
+
     const values = [
       body.title.trim(),
+      slug,
       normalizeDate(body.competitionDate),
       normalizeDate(body.registrationStartDate),
       normalizeText(body.topic),
@@ -897,6 +952,7 @@ if (dateError) {
     const result = await db.query(
       `INSERT INTO competitions (
         title,
+        slug,
         competition_date,
         registration_start_date,
         topic,
@@ -908,7 +964,7 @@ if (dateError) {
         image_url,
         is_active
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING ${competitionColumns}`,
       values
     );
@@ -1048,10 +1104,12 @@ if (dateError) {
           : existing.is_active;
 
     const isActive = normalizeActive(activeInput, existing.is_active);
+    const slug = generateCompetitionSlug(title, topic, id);
 
     const values = [
       id,
       title,
+      slug,
       competitionDate,
       registrationStartDate,
       topic,
@@ -1076,16 +1134,17 @@ if (dateError) {
       `UPDATE competitions
        SET
          title = $2,
-         competition_date = $3,
-         registration_start_date = $4,
-         topic = $5,
-         advisor_organizer = $6,
-         competition_url = $7,
-         overview = $8,
-         objective = $9,
-         participants = $10,
-         image_url = $11,
-         is_active = $12,
+         slug = $3,
+         competition_date = $4,
+         registration_start_date = $5,
+         topic = $6,
+         advisor_organizer = $7,
+         competition_url = $8,
+         overview = $9,
+         objective = $10,
+         participants = $11,
+         image_url = $12,
+         is_active = $13,
          updated_at = NOW()
        WHERE id = $1
        RETURNING ${competitionColumns}`,

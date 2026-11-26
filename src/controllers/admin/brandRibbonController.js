@@ -89,6 +89,12 @@ export const getUserBrandLogos = async (req, res) => {
       SELECT ${BRAND_LOGO_COLUMNS}
       FROM brand_logos
       WHERE status = 1
+       AND EXISTS (
+          SELECT 1
+          FROM products p
+          WHERE p.brand_id = brand_logos.id
+            AND p.status = 1
+        )
       ORDER BY sort_order ASC, id ASC
     `);
 
