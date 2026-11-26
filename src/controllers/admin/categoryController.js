@@ -28,6 +28,12 @@ export const getCategories = async (req, res) => {
       FROM categories c
       LEFT JOIN modules m ON c.module_id = m.id AND m.status != 2
       WHERE c.status != 2
+      AND EXISTS (
+      SELECT 1
+      FROM products p
+      WHERE p.category_id = c.id
+        AND p.status = 1
+    )
       ORDER BY c.id ASC
     `);
 
