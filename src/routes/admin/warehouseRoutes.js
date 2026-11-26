@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getWarehouses,
+  getWarehouseById,
   getDefaultWarehouse,
   createWarehouse,
   updateWarehouse,
@@ -16,6 +17,7 @@ router.get('/warehouses/default', getDefaultWarehouse);
 
 // Admin-protected CRUD endpoints
 router.get('/warehouses', authenticateToken, requireAdmin, getWarehouses);
+router.get('/warehouses/:id', authenticateToken, requireAdmin, getWarehouseById);
 router.post('/warehouses', authenticateToken, requireAdmin, createWarehouse);
 router.put('/warehouses/:id', authenticateToken, requireAdmin, updateWarehouse);
 router.patch('/warehouses/:id/default', authenticateToken, requireAdmin, setDefaultWarehouse);
