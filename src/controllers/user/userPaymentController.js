@@ -54,7 +54,8 @@ export const createRazorpayOrder = async (req, res) => {
       }
       if (subtotal > 0) {
         const incomingShippingFee = parseFloat(req.body.shipping_fee ?? req.body.shippingFee ?? 50.0);
-        const shippingFee = subtotal >= 1500 ? 0.0 : (isNaN(incomingShippingFee) ? 50.0 : Math.max(0, incomingShippingFee));
+        // const shippingFee = subtotal >= 1500 ? 0.0 : (isNaN(incomingShippingFee) ? 50.0 : Math.max(0, incomingShippingFee));
+        const shippingFee = isNaN(incomingShippingFee) ? 50.0 : Math.max(0, incomingShippingFee);
         const tax = 0;
         finalAmount = subtotal + shippingFee + tax;
       }
@@ -293,9 +294,10 @@ export const verifyRazorpayPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No valid products in cart.' });
     }
 
-    // Dynamic Shipping & Free Delivery threshold (₹1,500)
+    // Dynamic Shipping (Free Delivery threshold commented for now as requested)
     const incomingShippingFee = parseFloat(orderData?.shipping_fee ?? orderData?.shippingFee ?? req.body.shipping_fee ?? 50.0);
-    const shippingFee = subtotal >= 1500 ? 0.0 : (isNaN(incomingShippingFee) ? 50.0 : Math.max(0, incomingShippingFee));
+    // const shippingFee = subtotal >= 1500 ? 0.0 : (isNaN(incomingShippingFee) ? 50.0 : Math.max(0, incomingShippingFee));
+    const shippingFee = isNaN(incomingShippingFee) ? 50.0 : Math.max(0, incomingShippingFee);
     const tax = 0.0;
     const totalAmount = subtotal + shippingFee + tax;
 
