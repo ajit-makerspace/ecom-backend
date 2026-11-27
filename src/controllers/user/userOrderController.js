@@ -198,7 +198,9 @@ export const placeOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No valid products in cart.' });
     }
 
-    const shippingFee = subtotal > 150 ? 0.00 : 15.00;
+    // Dynamic Shipping & Free Delivery threshold (₹1,500)
+    const incomingShippingFee = parseFloat(req.body.shipping_fee ?? req.body.shippingFee ?? 50.0);
+    const shippingFee = subtotal >= 1500 ? 0.00 : (isNaN(incomingShippingFee) ? 50.00 : Math.max(0, incomingShippingFee));
     const tax = 0.00;
     const totalAmount = subtotal + shippingFee + tax;
 
